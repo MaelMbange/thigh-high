@@ -22,6 +22,46 @@ pub enum Focus {
     UrlInput,
     /// The filter picker is open over the library.
     Filter,
+    /// Asking whether to delete a track.
+    ConfirmDelete,
+}
+
+/// What happens when a track ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Repeat {
+    /// Play through the list once.
+    #[default]
+    Off,
+    /// Start the list over after the last track.
+    All,
+    /// Play the same track again.
+    One,
+}
+
+impl Repeat {
+    pub fn next(self) -> Self {
+        match self {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Repeat::Off => "off",
+            Repeat::All => "all",
+            Repeat::One => "track",
+        }
+    }
+}
+
+/// A pending deletion, waiting for the user to confirm.
+pub struct ConfirmDelete {
+    pub path: PathBuf,
+    pub title: String,
+    /// The highlighted answer; starts on No so a stray Enter deletes nothing.
+    pub yes: bool,
 }
 
 /// The filter picker: one tab per field, listing that field's values.
@@ -81,6 +121,8 @@ pub struct App {
     pub visible: Vec<usize>,
     pub filter: Option<Filter>,
     pub picker: Option<FilterPicker>,
+    pub confirm: Option<ConfirmDelete>,
+    pub repeat: Repeat,
     /// Selection within `visible`.
     pub list_state: ListState,
     pub now_playing: Option<PathBuf>,
@@ -135,6 +177,8 @@ impl App {
             tracks,
             filter: None,
             picker: None,
+            confirm: None,
+            repeat: Repeat::default(),
             list_state,
             now_playing: None,
             player,
@@ -224,6 +268,7 @@ impl App {
             Focus::UrlInput => self.handle_input_key(key),
             Focus::Library => self.handle_library_key(key),
             Focus::Filter => self.handle_picker_key(key),
+            Focus::ConfirmDelete => self.handle_confirm_key(key),
         }
     }
 
@@ -259,6 +304,11 @@ impl App {
             KeyCode::Char('f') => self.open_picker(),
             KeyCode::Char('x') => self.set_filter(None),
             KeyCode::Char('g') => self.analyze_missing_genres(),
+            KeyCode::Char('o') => {
+                self.repeat = self.repeat.next();
+                self.status = format!("Loop: {}", self.repeat.label());
+            }
+            KeyCode::Char('d') | KeyCode::Delete => self.ask_delete(),
             KeyCode::Char('v') => {
                 self.visual = self.visual.next();
                 self.status = format!("Animation: {}", self.visual.label());
@@ -333,6 +383,72 @@ impl App {
                 self.close_picker();
             }
             _ => {}
+        }
+    }
+
+    /// Opens the confirmation for deleting the selected track.
+    fn ask_delete(&mut self) {
+        let Some(track) = self
+            .list_state
+            .selected()
+            .and_then(|i| self.visible.get(i))
+            .map(|&i| &self.tracks[i])
+        else {
+            return;
+        };
+        self.confirm = Some(ConfirmDelete {
+            path: track.path.clone(),
+            title: track.title.clone(),
+            yes: false,
+        });
+        self.focus = Focus::ConfirmDelete;
+    }
+
+    fn handle_confirm_key(&mut self, key: KeyEvent) {
+        let Some(confirm) = &mut self.confirm else {
+            self.focus = Focus::Library;
+            return;
+        };
+        let delete = match key.code {
+            KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Char('h')
+            | KeyCode::Char('l') => {
+                confirm.yes = !confirm.yes;
+                return;
+            }
+            KeyCode::Char('y') => true,
+            KeyCode::Enter => confirm.yes,
+            KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => false,
+            _ => return,
+        };
+        let confirm = self.confirm.take();
+        self.focus = Focus::Library;
+        match confirm {
+            Some(confirm) if delete => self.delete(&confirm.path, &confirm.title),
+            _ => self.status = "Nothing deleted".into(),
+        }
+    }
+
+    /// Erases a track's file and removes it from the library.
+    fn delete(&mut self, path: &Path, title: &str) {
+        if self.now_playing.as_deref() == Some(path) {
+            self.stop();
+        }
+        self.unsaved_genres.remove(path);
+        match remove_file(path) {
+            Ok(()) => {
+                self.status = format!("Deleted: {title}");
+                let selected = self.list_state.selected();
+                self.refresh_library();
+                // Stay at the same spot in the list, on the next track.
+                let last = self.visible.len().checked_sub(1);
+                self.list_state
+                    .select(selected.zip(last).map(|(s, last)| s.min(last)));
+            }
+            Err(err) => self.status = format!("Could not delete {title}: {err}"),
         }
     }
 
@@ -460,12 +576,18 @@ impl App {
         self.play_index(next);
     }
 
-    /// Plays the next track when the current one ends.
+    /// Plays the next track (or the same one, when looping it) when the current one ends.
     fn advance_when_finished(&mut self) {
         let finished = self.player.as_ref().is_some_and(|p| p.is_finished());
         if finished && self.now_playing.is_some() {
+            if self.repeat == Repeat::One
+                && let Some(i) = self.playing_index()
+            {
+                self.play_index(i);
+                return;
+            }
             let last = self.playing_index() == Some(self.visible.len().saturating_sub(1));
-            if last || self.visible.is_empty() {
+            if (last && self.repeat == Repeat::Off) || self.visible.is_empty() {
                 self.now_playing = None;
                 self.status = "End of list".into();
                 self.save_genres();
@@ -635,5 +757,20 @@ impl App {
     pub fn current_track(&self) -> Option<&Track> {
         let playing = self.now_playing.as_ref()?;
         self.tracks.iter().find(|t| &t.path == playing)
+    }
+}
+
+/// Deletes a file, retrying briefly: on Windows a file can't be deleted while
+/// the ffmpeg process that was playing it is still shutting down.
+fn remove_file(path: &Path) -> std::io::Result<()> {
+    let mut attempts = 0;
+    loop {
+        match std::fs::remove_file(path) {
+            Err(err) if attempts < 10 && err.kind() != std::io::ErrorKind::NotFound => {
+                attempts += 1;
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            result => return result,
+        }
     }
 }

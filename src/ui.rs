@@ -8,7 +8,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Clear, LineGauge, List, ListItem, Paragraph, Tabs, Wrap,
 };
 
-use crate::app::{App, Focus, ToolsState};
+use crate::app::{App, Focus, Repeat, ToolsState};
 use crate::cover::Rgb;
 use crate::filter::Field;
 use crate::visualizer;
@@ -33,11 +33,18 @@ fn colors(app: &App) -> Colors {
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let help = help_line(app.focus, colors(app));
+    // The key list wraps onto a second row in narrow terminals.
+    let help_height = if help.width() > frame.area().width as usize {
+        2
+    } else {
+        1
+    };
     let [input_area, body_area, status_area, help_area] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(5),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(help_height),
     ])
     .areas(frame.area());
 
@@ -61,7 +68,62 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_player(frame, app, player_area);
 
     frame.render_widget(Paragraph::new(app.status.as_str()).dark_gray(), status_area);
-    frame.render_widget(help_line(app.focus, colors(app)), help_area);
+    frame.render_widget(Paragraph::new(help).wrap(Wrap { trim: true }), help_area);
+
+    if app.confirm.is_some() {
+        draw_confirm(frame, app);
+    }
+}
+
+/// The "delete this track?" dialog, centered over everything.
+fn draw_confirm(frame: &mut Frame, app: &App) {
+    let Some(confirm) = &app.confirm else {
+        return;
+    };
+    let colors = colors(app);
+    let [area] = Layout::horizontal([Constraint::Max(56)])
+        .flex(Flex::Center)
+        .areas(frame.area());
+    let [area] = Layout::vertical([Constraint::Length(7)])
+        .flex(Flex::Center)
+        .areas(area);
+    frame.render_widget(Clear, area);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().red())
+        .title(Line::from(" Delete track ").red().bold());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let button = |label: &str, selected: bool, color: Color| {
+        let span = Span::from(format!("  {label}  "));
+        if selected {
+            span.fg(Color::Black).bg(color).bold()
+        } else {
+            span.dark_gray()
+        }
+    };
+    let text = vec![
+        Line::from(vec![
+            Span::from("Delete "),
+            Span::from(confirm.title.as_str())
+                .fg(colors.secondary)
+                .bold(),
+            Span::from("?"),
+        ]),
+        Line::from("The file is erased from your disk.").dark_gray(),
+        Line::from(""),
+        Line::from(vec![
+            button("Yes", confirm.yes, Color::Red),
+            Span::from("   "),
+            button("No", !confirm.yes, colors.primary),
+        ]),
+    ];
+    frame.render_widget(
+        Paragraph::new(text).centered().wrap(Wrap { trim: true }),
+        inner.inner(Margin::new(1, 0)),
+    );
 }
 
 fn panel(title: impl std::fmt::Display, focused: bool, colors: Colors) -> Block<'static> {
@@ -348,6 +410,11 @@ fn draw_player(frame: &mut Frame, app: &mut App, area: Rect) {
             db => format!("    Bass +{db} dB"),
         })
         .fg(colors.primary),
+        Span::from(match app.repeat {
+            Repeat::Off => String::new(),
+            repeat => format!("    ⟳ Loop {}", repeat.label()),
+        })
+        .fg(colors.secondary),
     ]);
     frame.render_widget(Paragraph::new(controls).centered(), controls_area);
 }
@@ -357,7 +424,7 @@ fn format_time(duration: Duration) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
 
-fn help_line(focus: Focus, colors: Colors) -> Paragraph<'static> {
+fn help_line(focus: Focus, colors: Colors) -> Line<'static> {
     let keys: &[(&str, &str)] = match focus {
         Focus::Library => &[
             ("/", "URL"),
@@ -370,10 +437,18 @@ fn help_line(focus: Focus, colors: Colors) -> Paragraph<'static> {
             ("v", "anim"),
             ("f", "filter"),
             ("g", "genres"),
+            ("o", "loop"),
+            ("d", "delete"),
             ("r", "rescan"),
             ("q", "quit"),
         ],
         Focus::UrlInput => &[("Enter", "download"), ("Esc", "back")],
+        Focus::ConfirmDelete => &[
+            ("←→", "choose"),
+            ("Enter", "confirm"),
+            ("y", "yes"),
+            ("n/Esc", "no"),
+        ],
         Focus::Filter => &[
             ("←→", "field"),
             ("↑↓", "value"),
@@ -389,10 +464,11 @@ fn help_line(focus: Focus, colors: Colors) -> Paragraph<'static> {
         .zip(key_colors.iter().cycle())
         .flat_map(|((key, action), &color)| {
             [
-                Span::from(format!(" {key} ")).fg(color).bold(),
+                // A non-breaking space keeps each key with its action when wrapping.
+                Span::from(format!(" {key}\u{a0}")).fg(color).bold(),
                 Span::from(format!("{action}  ")),
             ]
         })
         .collect();
-    Paragraph::new(Line::from(spans))
+    Line::from(spans)
 }

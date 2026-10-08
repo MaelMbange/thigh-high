@@ -10,8 +10,6 @@ cargo run
 
 Downloaded music is stored in your Music folder under `thigh-high`.
 
-Btw, I didn't know what to name this repo, so I picked a random name.
-
 ## Now playing
 
 An animation fills the top of the Now playing panel: by default an
@@ -50,22 +48,24 @@ Technology Group, Universitat Pompeu Fabra, under the ISC license
 
 ## Keys
 
-| Key               | Action                                                       |
-| ----------------- | ------------------------------------------------------------ |
-| `/` or `i`        | Focus the URL bar                                            |
-| `Enter` (URL bar) | Download the pasted URL                                      |
-| `Esc`             | Leave the URL bar                                            |
-| `↑` `↓` / `j` `k` | Move in the library                                          |
-| `Enter` (library) | Play the selected track                                      |
-| `Space`           | Pause / resume                                               |
-| `n` / `p`         | Next / previous track                                        |
-| `←` `→` / `h` `l` | Seek 5 seconds                                               |
-| `+` / `-`         | Volume                                                       |
-| `b`               | Bass boost (off, +3, +6, +9, +12 dB)                         |
-| `v`               | Switch animation (oscilloscope, fusion, bars, mirror, waves) |
-| `s`               | Stop                                                         |
-| `f`               | Filter by artist, genre or album                             |
-| `x`               | Clear the filter                                             |
-| `g`               | Detect the genre of tracks that have none                    |
-| `r`               | Rescan the music folder                                      |
-| `q` / `Ctrl+C`    | Quit                                                         |
+| Key | Action |
+| --- | --- |
+| `/` or `i` | Focus the URL bar |
+| `Enter` (URL bar) | Download the pasted URL |
+| `Esc` | Leave the URL bar |
+| `↑` `↓` / `j` `k` | Move in the library |
+| `Enter` (library) | Play the selected track |
+| `Space` | Pause / resume |
+| `n` / `p` | Next / previous track |
+| `←` `→` / `h` `l` | Seek 5 seconds |
+| `+` / `-` | Volume |
+| `b` | Bass boost (off, +3, +6, +9, +12 dB) |
+| `v` | Switch animation (oscilloscope, fusion, bars, mirror, waves) |
+| `s` | Stop |
+| `f` | Filter by artist, genre or album |
+| `x` | Clear the filter |
+| `g` | Detect the genre of tracks that have none |
+| `o` | Loop: off, whole list, current track |
+| `d` / `Delete` | Delete the selected track (asks first, No is preselected) |
+| `r` | Rescan the music folder |
+| `q` / `Ctrl+C` | Quit |
