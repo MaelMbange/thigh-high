@@ -82,7 +82,7 @@ fn is_placeholder_genre(genre: &str) -> bool {
         .any(|p| p.eq_ignore_ascii_case(genre))
 }
 
-fn is_audio(path: &Path) -> bool {
+pub fn is_audio(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
