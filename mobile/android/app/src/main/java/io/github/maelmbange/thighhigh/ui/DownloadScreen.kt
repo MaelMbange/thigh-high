@@ -105,6 +105,7 @@ private fun JobCard(job: DownloadJob, onCancel: () -> Unit, onDismiss: () -> Uni
                     DownloadStatus.Waiting -> stringResource(R.string.download_waiting)
                     DownloadStatus.Downloading -> job.percent?.let { "%.0f %%".format(it) }
                         ?: stringResource(R.string.download_starting)
+                    DownloadStatus.Analyzing -> stringResource(R.string.download_analyzing)
                     DownloadStatus.Saving -> stringResource(R.string.download_saving)
                     DownloadStatus.Done -> stringResource(R.string.download_done)
                     DownloadStatus.Canceled -> stringResource(R.string.download_canceled)

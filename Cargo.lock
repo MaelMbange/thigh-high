@@ -2774,6 +2774,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "thigh-high-android"
+version = "0.1.0"
+dependencies = [
+ "jni 0.21.1",
+ "thigh-high-core",
+]
+
+[[package]]
 name = "thigh-high-core"
 version = "0.1.0"
 dependencies = [

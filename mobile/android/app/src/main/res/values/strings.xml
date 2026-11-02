@@ -18,6 +18,7 @@
     <string name="download_hint">Colle un lien, ou partage une vidéo vers thigh-high depuis l\'app YouTube. Le son est enregistré dans Music/thigh-high avec sa pochette.</string>
     <string name="download_waiting">Préparation de yt-dlp…</string>
     <string name="download_starting">Démarrage…</string>
+    <string name="download_analyzing">Détection du genre…</string>
     <string name="download_saving">Enregistrement…</string>
     <string name="download_done">Ajouté à la bibliothèque</string>
     <string name="download_canceled">Annulé</string>
@@ -31,6 +32,24 @@
     <string name="repeat_off">Boucle désactivée</string>
     <string name="repeat_all">Boucle sur la liste</string>
     <string name="repeat_one">Boucle sur le morceau</string>
+    <string name="filter">Filtrer</string>
+    <string name="filter_artist">Artiste</string>
+    <string name="filter_genre">Genre</string>
+    <string name="filter_album">Album</string>
+    <string name="filter_unknown">Inconnu</string>
+    <string name="filter_clear">Retirer le filtre</string>
+    <string name="more">Plus d\'options</string>
+    <string name="detect_genres">Détecter les genres manquants</string>
+    <string name="genre_scan_running">Détection des genres : %1$d / %2$d</string>
     <string name="cancel">Annuler</string>
     <string name="dismiss">Retirer</string>
+
+    <plurals name="genre_scan_done">
+        <item quantity="one">Genres détectés : %1$d sur %2$d morceau</item>
+        <item quantity="other">Genres détectés : %1$d sur %2$d morceaux</item>
+    </plurals>
+    <plurals name="genre_scan_failed">
+        <item quantity="one">%1$d fichier n\'a pas pu être modifié (ajouté par une autre app)</item>
+        <item quantity="other">%1$d fichiers n\'ont pas pu être modifiés (ajoutés par une autre app)</item>
+    </plurals>
 </resources>

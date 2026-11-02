@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.library.scanLibrary
 import io.github.maelmbange.thighhigh.playback.PlaybackService
@@ -20,7 +21,10 @@ import io.github.maelmbange.thighhigh.ui.CoverPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -56,6 +60,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** `null` until the first scan finishes. */
     val tracks: StateFlow<List<Track>?> = _tracks.asStateFlow()
 
+    /** The artist/genre/album filter, or null to show everything. */
+    val filter = MutableStateFlow<Filter?>(null)
+
+    /** The tracks shown (and queued when one is played): the library after the filter. */
+    val visibleTracks: StateFlow<List<Track>?> = combine(_tracks, filter) { tracks, f ->
+        if (f == null) tracks else tracks?.filter(f::matches)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private val _playback = MutableStateFlow(PlaybackState())
     val playback: StateFlow<PlaybackState> = _playback.asStateFlow()
 
@@ -69,6 +81,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     val playerOpen = MutableStateFlow(false)
 
     val downloader = getApplication<ThighHighApp>().downloader
+
+    val genreScanner = getApplication<ThighHighApp>().genreScanner
 
     private var controller: MediaController? = null
     private val controllerFuture: ListenableFuture<MediaController> =
@@ -84,6 +98,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // A finished download shows up in the list right away.
         viewModelScope.launch { downloader.added.collect { refresh() } }
+        viewModelScope.launch { genreScanner.changed.collect { refresh() } }
         viewModelScope.launch {
             playback.map { it.currentId }.distinctUntilChanged().collect { loadCover(it) }
         }
@@ -105,7 +120,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun play(track: Track) {
         playerOpen.value = true
         val c = controller ?: return
-        val list = _tracks.value ?: return
+        val list = visibleTracks.value ?: return
         if (_playback.value.currentId == track.id) {
             if (!c.isPlaying) resume(c)
             return
@@ -113,6 +128,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track), 0L)
         c.prepare()
         c.play()
+    }
+
+    /** Detects the genre of every track that has none (the terminal app's `g`). */
+    fun detectMissingGenres() {
+        _tracks.value?.let(genreScanner::scan)
     }
 
     fun togglePlayPause() {

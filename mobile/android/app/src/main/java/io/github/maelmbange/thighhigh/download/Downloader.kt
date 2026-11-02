@@ -9,6 +9,8 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.github.maelmbange.thighhigh.genre.existingGenre
+import io.github.maelmbange.thighhigh.genre.tagGenre
 import io.github.maelmbange.thighhigh.library.MUSIC_RELATIVE_PATH
 import java.io.File
 import java.util.UUID
@@ -31,7 +33,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-enum class DownloadStatus { Waiting, Downloading, Saving, Done, Failed, Canceled }
+enum class DownloadStatus { Waiting, Downloading, Analyzing, Saving, Done, Failed, Canceled }
 
 data class DownloadJob(
     val id: String,
@@ -42,7 +44,7 @@ data class DownloadJob(
     val status: DownloadStatus = DownloadStatus.Waiting,
     val error: String? = null,
 ) {
-    val isActive get() = status in setOf(DownloadStatus.Waiting, DownloadStatus.Downloading, DownloadStatus.Saving)
+    val isActive get() = status in setOf(DownloadStatus.Waiting, DownloadStatus.Downloading, DownloadStatus.Analyzing, DownloadStatus.Saving)
 }
 
 /** Same formats the terminal app treats as music. */
@@ -125,6 +127,7 @@ class Downloader(context: Context) {
         val dir = File(app.cacheDir, "downloads/${job.id}").apply { mkdirs() }
         try {
             val file = fetch(job, dir)
+            detectGenre(job, file)
             set(job.id) { it.copy(status = DownloadStatus.Saving, percent = 100f) }
             save(file)
             set(job.id) { it.copy(status = DownloadStatus.Done) }
@@ -138,6 +141,20 @@ class Downloader(context: Context) {
             }
         } finally {
             dir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Like the terminal app, new downloads get their genre detected when the
+     * site gave none (YouTube's "Music" doesn't count). Never fails the download.
+     */
+    private fun detectGenre(job: DownloadJob, file: File) {
+        if (existingGenre(file.path) != null) return
+        set(job.id) { it.copy(status = DownloadStatus.Analyzing) }
+        try {
+            tagGenre(file.path)
+        } catch (e: Throwable) {
+            Log.w(TAG, "genre detection failed", e)
         }
     }
 

@@ -11,7 +11,10 @@ data class Track(
     val title: String,
     val artist: String?,
     val album: String?,
+    val genre: String?,
     val duration: Duration?,
+    /** The file on disk, for reading and writing tags. */
+    val path: String?,
 ) {
     val uri: Uri get() = uriOf(id)
 

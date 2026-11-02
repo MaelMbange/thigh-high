@@ -4,17 +4,23 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Where the Rust core is built (see cargoBuild below).
+val repoRoot: File = rootDir.resolve("../..").canonicalFile
+val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
+
 android {
     namespace = "io.github.maelmbange.thighhigh"
     compileSdk = 36
+    // Used to cross-compile the Rust core; Android Studio installs it if missing.
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "io.github.maelmbange.thighhigh"
         // Android 10+: MediaStore exposes RELATIVE_PATH, used to find Music/thigh-high.
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         ndk {
             // yt-dlp ships Python and ffmpeg per CPU type (~30 MB each): keep
@@ -41,7 +47,11 @@ android {
     packaging {
         // Native libraries must be unpacked on install for youtubedl-android.
         jniLibs.useLegacyPackaging = true
+        // Zip archives named .so so Android unpacks them: nothing to strip.
+        jniLibs.keepDebugSymbols += setOf("**/libpython.zip.so", "**/libffmpeg.zip.so")
     }
+
+    sourceSets["main"].jniLibs.srcDir(rustJniLibs)
 
     buildFeatures {
         compose = true
@@ -53,6 +63,32 @@ kotlin {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
+
+// The Rust core (crates/core) through its JNI bridge (crates/android), built
+// for the phone with cargo-ndk. Needs, once: Rust, `cargo install cargo-ndk`
+// and `rustup target add aarch64-linux-android`. Cargo only rebuilds what changed.
+
+val cargoBuild by tasks.registering(Exec::class) {
+    description = "Builds the Rust core for Android."
+    workingDir = repoRoot
+    inputs.dir(repoRoot.resolve("crates/core/src"))
+    inputs.dir(repoRoot.resolve("crates/android/src"))
+    inputs.dir(repoRoot.resolve("assets"))
+    inputs.files(repoRoot.resolve("Cargo.lock"), repoRoot.resolve("crates/core/Cargo.toml"), repoRoot.resolve("crates/android/Cargo.toml"))
+    outputs.dir(rustJniLibs)
+    doFirst {
+        environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
+    }
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "--platform", "29",
+        "-o", rustJniLibs.get().asFile.absolutePath,
+        "build", "--release", "-p", "thigh-high-android",
+    )
+}
+
+tasks.named("preBuild") { dependsOn(cargoBuild) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)

@@ -12,6 +12,13 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
   switches to the cover art), loop (off / list / track), previous, play/pause,
   next, stop and a seek bar. The top-left button (or Back) shrinks it to a bar
   above the tabs without stopping the music; tap the bar to open it again.
+- The filter button narrows the library to one artist, genre or album, and
+  "Detect missing genres" in the ⋮ menu runs the genre model on every track
+  without one (the terminal app's `f` and `g`). New downloads get their genre
+  detected automatically. The model is the Rust core's (`crates/core`),
+  reached through the JNI bridge in `crates/android`; tracks are decoded with
+  Android's own codecs. Files put in the folder by another app can't be
+  edited by thigh-high, so their genre stays unknown.
 - Colors come from the cover art, with the same algorithm as the terminal
   app (`crates/core/src/cover.rs`, ported in `ui/CoverPalette.kt`).
 - Playback runs in a media service, so it keeps going in the background with
@@ -32,7 +39,16 @@ the refresh button.
 
 ## Build
 
-Open `mobile/android` in Android Studio, or from this folder:
+The build compiles the Rust core for the phone, so it needs, once:
+
+```
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+```
+
+Android Studio installs the right NDK by itself (version set in
+`app/build.gradle.kts`). Then open `mobile/android` in Android Studio, or from
+this folder:
 
 ```
 ./gradlew assembleRelease
@@ -51,5 +67,6 @@ sources); a real signing key comes with the GitHub Releases milestone.
 - `download/Downloader.kt`: runs yt-dlp and files the result through MediaStore.
 - `ui/`: Compose screens.
 
-The Rust core (`crates/core`) is not linked yet; it comes in with genre
-detection.
+Genre detection runs the Rust core (`crates/core`) through `crates/android`;
+the cover palette and filters are small Kotlin ports of the core's
+`cover.rs` and `filter.rs`.

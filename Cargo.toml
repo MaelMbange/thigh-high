@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/tui"]
+members = ["crates/core", "crates/tui", "crates/android"]
 # `cargo run` at the root still starts the terminal app.
 default-members = ["crates/tui"]
 

@@ -1,0 +1,14 @@
+[package]
+name = "thigh-high-android"
+description = "JNI bridge exposing the shared core to the Android app"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+# Loaded by the app with System.loadLibrary("thigh_high_android").
+crate-type = ["cdylib"]
+
+[dependencies]
+thigh-high-core = { path = "../core" }
+jni = "0.21.1"

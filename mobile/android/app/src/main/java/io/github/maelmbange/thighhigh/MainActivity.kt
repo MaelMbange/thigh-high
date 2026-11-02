@@ -21,8 +21,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +50,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maelmbange.thighhigh.ui.DownloadScreen
+import io.github.maelmbange.thighhigh.ui.FilterSheet
 import io.github.maelmbange.thighhigh.ui.LibraryScreen
 import io.github.maelmbange.thighhigh.ui.MiniPlayer
 import io.github.maelmbange.thighhigh.ui.PermissionScreen
@@ -108,6 +113,11 @@ class MainActivity : ComponentActivity() {
 
         val tab by viewModel.tab.collectAsStateWithLifecycle()
         val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+        val visibleTracks by viewModel.visibleTracks.collectAsStateWithLifecycle()
+        val filter by viewModel.filter.collectAsStateWithLifecycle()
+        val genreScan by viewModel.genreScanner.progress.collectAsStateWithLifecycle()
+        var filterSheetOpen by remember { mutableStateOf(false) }
+        var menuOpen by remember { mutableStateOf(false) }
         val playback by viewModel.playback.collectAsStateWithLifecycle()
         val jobs by viewModel.downloader.jobs.collectAsStateWithLifecycle()
         val cover by viewModel.cover.collectAsStateWithLifecycle()
@@ -127,8 +137,26 @@ class MainActivity : ComponentActivity() {
                     },
                     actions = {
                         if (tab == Tab.Library && granted) {
+                            IconButton(onClick = { filterSheetOpen = true }) {
+                                Icon(Icons.Default.FilterList, stringResource(R.string.filter))
+                            }
                             IconButton(onClick = viewModel::refresh) {
                                 Icon(Icons.Default.Refresh, stringResource(R.string.refresh))
+                            }
+                            Box {
+                                IconButton(onClick = { menuOpen = true }) {
+                                    Icon(Icons.Default.MoreVert, stringResource(R.string.more))
+                                }
+                                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.detect_genres)) },
+                                        enabled = genreScan?.finished != false,
+                                        onClick = {
+                                            menuOpen = false
+                                            viewModel.detectMissingGenres()
+                                        },
+                                    )
+                                }
                             }
                         }
                     },
@@ -164,7 +192,25 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.padding(padding)) {
                 when (tab) {
                     Tab.Library -> if (granted) {
-                        LibraryScreen(tracks, playback.currentId, onTrackClick = viewModel::play)
+                        LibraryScreen(
+                            tracks = visibleTracks,
+                            currentId = playback.currentId,
+                            filter = filter,
+                            genreScan = genreScan,
+                            onTrackClick = viewModel::play,
+                            onClearFilter = { viewModel.filter.value = null },
+                        )
+                        if (filterSheetOpen) {
+                            FilterSheet(
+                                tracks = tracks.orEmpty(),
+                                current = filter,
+                                onPick = {
+                                    viewModel.filter.value = it
+                                    filterSheetOpen = false
+                                },
+                                onDismiss = { filterSheetOpen = false },
+                            )
+                        }
                     } else {
                         PermissionScreen(onGrant = { launcher.launch(REQUESTED_PERMISSIONS) })
                     }

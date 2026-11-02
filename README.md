@@ -19,6 +19,8 @@ The repository is a Cargo workspace:
   It never starts a process or picks a folder.
 - `crates/tui`: the terminal app (ratatui UI, playback and downloads through
   ffmpeg and yt-dlp).
+- `crates/android`: the JNI bridge the Android app uses to run the core's
+  genre model.
 - `mobile/android`: the Android app (Kotlin, Jetpack Compose, Media3). See
   `mobile/android/README.md`.
 - `assets`: the genre model and its mel filterbank.
