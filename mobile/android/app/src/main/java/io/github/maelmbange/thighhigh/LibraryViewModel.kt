@@ -11,8 +11,6 @@ import android.util.Size
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -21,7 +19,9 @@ import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.library.matchesSearch
 import io.github.maelmbange.thighhigh.library.scanLibrary
+import io.github.maelmbange.thighhigh.library.toMediaItem
 import io.github.maelmbange.thighhigh.playback.PlaybackService
+import io.github.maelmbange.thighhigh.playback.QueueStore
 import io.github.maelmbange.thighhigh.ui.CoverPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,7 +118,29 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             controller = c
             c.addListener(listener)
             syncState(c)
+            if (c.mediaItemCount == 0) restoreQueue(c)
         }, ContextCompat.getMainExecutor(app))
+    }
+
+    /**
+     * Puts back the queue left when the app was last closed, paused where it
+     * stopped, so the mini player shows the last track and play resumes it.
+     */
+    private fun restoreQueue(c: MediaController) {
+        viewModelScope.launch {
+            val restored = withContext(Dispatchers.IO) {
+                val saved = QueueStore(getApplication()).load() ?: return@withContext null
+                val byId = scanLibrary(getApplication()).associateBy { it.id }
+                val kept = saved.ids.mapNotNull(byId::get)
+                val index = kept.indexOfFirst { it.id == saved.ids[saved.index] }
+                if (kept.isEmpty()) null else Triple(saved, kept, index)
+            } ?: return@launch
+            val (saved, kept, index) = restored
+            if (c.mediaItemCount != 0) return@launch // something started meanwhile
+            c.repeatMode = saved.repeatMode
+            c.shuffleModeEnabled = saved.shuffle
+            c.setMediaItems(kept.map { it.toMediaItem() }, index.coerceAtLeast(0), if (index >= 0) saved.positionMs else 0L)
+        }
     }
 
     fun refresh() {
@@ -299,16 +321,3 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         MediaController.releaseFuture(controllerFuture)
     }
 }
-
-private fun Track.toMediaItem(): MediaItem =
-    MediaItem.Builder()
-        .setMediaId(id.toString())
-        .setUri(uri)
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(title)
-                .setArtist(artist)
-                .setAlbumTitle(album)
-                .build()
-        )
-        .build()

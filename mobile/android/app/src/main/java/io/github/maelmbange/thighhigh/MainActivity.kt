@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         hideNavigationBar()
-        if (savedInstanceState == null) handleShare(intent)
+        if (savedInstanceState == null) handleIntent(intent)
         setContent {
             // The whole interface follows the cover of the track that plays.
             val cover by viewModel.cover.collectAsStateWithLifecycle()
@@ -99,11 +99,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleShare(intent)
+        handleIntent(intent)
     }
 
-    /** "Share" from YouTube (or any app) starts the download right away. */
-    private fun handleShare(intent: Intent?) {
+    /**
+     * The media notification opens the player; "Share" from YouTube (or any
+     * app) starts the download right away.
+     */
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_PLAYER) {
+            viewModel.playerOpen.value = true
+            return
+        }
         if (intent?.action != Intent.ACTION_SEND) return
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
         val url = URL_PATTERN.find(text)?.value ?: return
@@ -296,10 +303,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
-        val URL_PATTERN = Regex("""https?://\S+""")
+    companion object {
+        /** Sent by the media notification and the lock screen. */
+        const val ACTION_OPEN_PLAYER = "io.github.maelmbange.thighhigh.OPEN_PLAYER"
 
-        val AUDIO_PERMISSION =
+        private val URL_PATTERN = Regex("""https?://\S+""")
+
+        private val AUDIO_PERMISSION =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 Manifest.permission.READ_MEDIA_AUDIO
             } else {
@@ -307,7 +317,7 @@ class MainActivity : ComponentActivity() {
             }
 
         /** Notifications show the playback controls on Android 13+. */
-        val REQUESTED_PERMISSIONS =
+        private val REQUESTED_PERMISSIONS =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 arrayOf(AUDIO_PERMISSION, Manifest.permission.POST_NOTIFICATIONS)
             } else {
