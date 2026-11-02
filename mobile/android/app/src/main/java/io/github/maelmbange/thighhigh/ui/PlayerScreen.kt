@@ -131,7 +131,7 @@ fun PlayerScreen(
         Text(
             track.artist ?: stringResource(R.string.unknown_artist),
             style = MaterialTheme.typography.titleMedium,
-            color = palette.primary,
+            color = palette.secondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -146,8 +146,8 @@ fun PlayerScreen(
             IconButton(onClick = onCycleRepeat) {
                 when (playback.repeat) {
                     Repeat.Off -> Icon(Icons.Default.Repeat, stringResource(R.string.repeat_off))
-                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = palette.primary)
-                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = palette.primary)
+                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = palette.secondary)
+                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = palette.secondary)
                 }
             }
             IconButton(onClick = onPrevious, Modifier.size(56.dp)) {
@@ -156,7 +156,7 @@ fun PlayerScreen(
             FilledIconButton(
                 onClick = onTogglePlay,
                 modifier = Modifier.size(72.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = palette.primary, contentColor = Color.Black),
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = palette.tertiary, contentColor = Color.Black),
             ) {
                 if (playback.isPlaying) Icon(Icons.Default.Pause, stringResource(R.string.pause), Modifier.size(40.dp))
                 else Icon(Icons.Default.PlayArrow, stringResource(R.string.play), Modifier.size(40.dp))
@@ -190,8 +190,8 @@ private fun CoverArt(cover: Cover, modifier: Modifier) {
 
 /**
  * The seek bar as a row of bars dancing with the music: played bars in the
- * cover's main color, the rest dimmed. The position dot rides on top of the
- * bar under it. Tap or drag anywhere to seek.
+ * cover's second to third color as they rise, the rest dimmed. The position
+ * dot stays on the center line. Tap or drag anywhere to seek.
  */
 @Composable
 private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: () -> Long, onSeek: (Long) -> Unit) {
@@ -254,7 +254,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
             for (i in 0 until n) {
                 val x = i * slot + (slot - barWidth) / 2
                 val h = height(i)
-                val color = if (x + barWidth / 2 <= playedX) palette.primary else palette.primary.copy(alpha = 0.28f)
+                val color = if (x + barWidth / 2 <= playedX) lerp(palette.secondary, palette.tertiary, bars[i])
+                else palette.secondary.copy(alpha = 0.25f)
                 drawRoundRect(
                     color,
                     topLeft = Offset(x, mid - h / 2),
@@ -262,11 +263,11 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
                     cornerRadius = CornerRadius(barWidth / 2),
                 )
             }
-            // The dot sits on the top edge of the bar under it, moving with it.
-            val under = (fraction * n).toInt().coerceIn(0, n - 1)
+            // The position dot stays on the center line while the bars move.
             val radius = 6.dp.toPx()
-            drawCircle(Color.White, radius, Offset(playedX.coerceIn(radius, size.width - radius), mid - height(under) / 2))
-            drawCircle(palette.primary, radius * 0.6f, Offset(playedX.coerceIn(radius, size.width - radius), mid - height(under) / 2))
+            val dot = Offset(playedX.coerceIn(radius, size.width - radius), mid)
+            drawCircle(Color.White, radius, dot)
+            drawCircle(palette.tertiary, radius * 0.6f, dot)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val shown = dragFraction?.let { (it * duration).toLong() } ?: position

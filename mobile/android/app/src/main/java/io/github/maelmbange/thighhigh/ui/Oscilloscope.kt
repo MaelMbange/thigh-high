@@ -23,16 +23,32 @@ import kotlin.math.roundToInt
  * 2 × 4 dots each), from the secondary color near silence to the tertiary at
  * its peaks. Quiet tracks are scaled up to stay visible.
  */
+/** Samples on screen (~11 ms at 44.1 kHz). */
+private const val SHOWN = 512
+
+/** Points averaged on each side of a sample. */
+private const val SMOOTH = 3
+
 @Composable
 fun Oscilloscope(palette: CoverPalette, modifier: Modifier = Modifier) {
-    val samples = remember { FloatArray(AudioTap.WINDOW) }
+    val raw = remember { FloatArray(AudioTap.WINDOW) }
+    val samples = remember { FloatArray(SHOWN) }
     var frame by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) withFrameNanos { frame = it }
     }
     Canvas(modifier) {
         @Suppress("UNUSED_EXPRESSION") frame // redraw on every frame
-        AudioTap.waveform(samples)
+        AudioTap.waveform(raw)
+        // Calmer than the raw signal: the most recent half of the window
+        // (wider waves on screen), each point averaged with its neighbours
+        // to drop the high-pitched jitter that filled the screen with spikes.
+        val offset = raw.size - SHOWN
+        for (i in 0 until SHOWN) {
+            var sum = 0f
+            for (j in -SMOOTH..SMOOTH) sum += raw[(offset + i + j).coerceIn(0, raw.size - 1)]
+            samples[i] = sum / (2 * SMOOTH + 1)
+        }
         val peak = max(samples.maxOf { abs(it) }, 0.25f)
 
         // Dot grid: braille cells are about twice as tall as wide, so dots
