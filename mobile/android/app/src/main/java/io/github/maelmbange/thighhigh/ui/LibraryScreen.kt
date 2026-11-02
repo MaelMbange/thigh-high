@@ -31,10 +31,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -46,7 +45,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.genre.GenreScan
-import io.github.maelmbange.thighhigh.library.CoverColors
 import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
 import kotlin.time.Duration
@@ -122,21 +120,21 @@ private fun BoxScope.LibraryList(
         }
 }
 
-/**
- * Each track wears its cover's colors: the title in the main color, the
- * artist in the second and the genre in the third. Tracks without a cover keep the theme's colors.
- */
+/** Fixed list colors in the Catppuccin Mocha style, the same for every track. */
+private object ListColors {
+    val title = Color(0xFFB4BEFE) // Lavender
+    val playing = Color(0xFFCBA6F7) // Mauve
+    val artist = Color(0xFF89DCEB) // Sky
+    val genre = Color(0xFFFAB387) // Peach
+    val duration = Color(0xFF7F849C) // Overlay 1
+}
+
 @Composable
 private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
-    val context = LocalContext.current
-    val palette by produceState(CoverColors.cached(track.id)?.palette, track.id) {
-        value = CoverColors.load(context, track.id)
-    }
-    val defaults = ListItemDefaults.colors()
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = if (playing) {
-            { Icon(Icons.Default.GraphicEq, null, tint = palette?.primary ?: MaterialTheme.colorScheme.primary) }
+            { Icon(Icons.Default.GraphicEq, null, tint = ListColors.playing) }
         } else {
             null
         },
@@ -149,16 +147,13 @@ private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
             )
         },
         supportingContent = {
-            // Artist in the cover's second color, genre in its third.
             val artist = track.artist ?: stringResource(R.string.unknown_artist)
             Text(
                 buildAnnotatedString {
                     append(artist)
                     if (track.genre != null) {
                         append(" · ")
-                        withStyle(SpanStyle(color = palette?.tertiary ?: MaterialTheme.colorScheme.primary)) {
-                            append(track.genre)
-                        }
+                        withStyle(SpanStyle(color = ListColors.genre)) { append(track.genre) }
                     }
                 },
                 maxLines = 1,
@@ -167,8 +162,9 @@ private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
         },
         trailingContent = { track.duration?.let { Text(formatDuration(it)) } },
         colors = ListItemDefaults.colors(
-            headlineColor = palette?.primary ?: defaults.headlineColor,
-            supportingColor = palette?.secondary ?: defaults.supportingTextColor,
+            headlineColor = if (playing) ListColors.playing else ListColors.title,
+            supportingColor = ListColors.artist,
+            trailingIconColor = ListColors.duration,
         ),
     )
 }

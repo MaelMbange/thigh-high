@@ -93,6 +93,13 @@ fun PlayerScreen(
     Column(
         Modifier
             .fillMaxSize()
+            // Swallow every touch that no control takes, so taps never reach the
+            // library and tabs drawn underneath.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                }
+            }
             .background(Brush.verticalGradient(listOf(lerp(background, palette.primary, 0.35f), background)))
             .systemBarsPadding()
             .padding(horizontal = 16.dp),
