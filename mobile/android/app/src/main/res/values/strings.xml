@@ -26,6 +26,14 @@
     <string name="download_saving">Enregistrement…</string>
     <string name="download_done">Ajouté à la bibliothèque</string>
     <string name="download_canceled">Annulé</string>
+    <string name="download_comparing">Recherche de doublons…</string>
+    <string name="download_duplicate">Déjà dans la bibliothèque : %1$s</string>
+    <string name="download_duplicate_running">Ce lien est déjà en cours de téléchargement</string>
+    <string name="download_anyway">Télécharger quand même</string>
+    <string name="download_similar">Même son que %1$s, déjà dans la bibliothèque. Passer à cette nouvelle version ?</string>
+    <string name="download_replace">Remplacer l\'ancienne</string>
+    <string name="download_keep_both">Garder les deux</string>
+    <string name="download_replaced">Ajouté, ancienne version supprimée</string>
     <string name="download_failed">Échec du téléchargement</string>
     <string name="minimize">Réduire</string>
     <string name="show_cover">Afficher la pochette</string>

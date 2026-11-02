@@ -356,6 +356,13 @@ class MainActivity : ComponentActivity() {
                         onDismiss = viewModel.downloader::dismiss,
                         ytdlp = ytdlp,
                         onUpdateYtDlp = viewModel.downloader::update,
+                        onDownloadAnyway = viewModel.downloader::downloadAnyway,
+                        onKeepBoth = viewModel.downloader::keepBoth,
+                        onReplaceOld = { job ->
+                            viewModel.replaceOld(job)?.let {
+                                deleteLauncher.launch(IntentSenderRequest.Builder(it).build())
+                            }
+                        },
                     )
                 }
               }

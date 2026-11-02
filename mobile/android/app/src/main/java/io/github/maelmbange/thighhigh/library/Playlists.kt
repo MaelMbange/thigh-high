@@ -47,6 +47,14 @@ class PlaylistStore(context: Context) {
 
     fun remove(id: String, trackId: Long) = edit(id) { p -> p.copy(trackIds = p.trackIds - trackId) }
 
+    /** [old] was replaced by a new version of the same song: playlists keep their place for it. */
+    fun replaceTrack(old: Long, new: Long) = change { list ->
+        list.map { p ->
+            if (old !in p.trackIds) p
+            else p.copy(trackIds = p.trackIds.map { if (it == old) new else it }.distinct())
+        }
+    }
+
     private fun edit(id: String, change: (Playlist) -> Playlist) =
         change { list -> list.map { if (it.id == id) change(it) else it } }
 

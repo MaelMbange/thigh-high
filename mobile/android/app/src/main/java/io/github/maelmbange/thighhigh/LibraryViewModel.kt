@@ -1,5 +1,6 @@
 package io.github.maelmbange.thighhigh
 
+import io.github.maelmbange.thighhigh.download.DownloadJob
 import android.app.Application
 import android.content.ComponentName
 import android.graphics.Bitmap
@@ -333,11 +334,35 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A download whose older version is being deleted: (download, old track, new track). */
+    private var pendingReplace: Triple<String, Long, Long>? = null
+
+    /**
+     * Deletes the older version of the song [job] downloaded again; playlists
+     * and the queue move to the new one. Same dialog as [delete].
+     */
+    fun replaceOld(job: DownloadJob): IntentSender? {
+        val old = job.similar ?: return null
+        val new = job.trackId ?: return null
+        val track = _tracks.value?.firstOrNull { it.id == old.trackId }
+        if (track == null) {
+            // Already gone from the phone.
+            playlistStore.replaceTrack(old.trackId, new)
+            downloader.replaced(job.id)
+            return null
+        }
+        pendingReplace = Triple(job.id, old.trackId, new)
+        return delete(track)
+    }
+
     /** The user answered the system dialog opened by [delete]. */
     fun onDeleteConfirmed(confirmed: Boolean) {
         val track = pendingDelete ?: return
         pendingDelete = null
-        if (!confirmed) return
+        if (!confirmed) {
+            pendingReplace = null
+            return
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             // Android 10 only granted access: the file still has to be deleted.
             runCatching { getApplication<Application>().contentResolver.delete(track.uri, null, null) }
@@ -347,10 +372,21 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Drops a deleted track from the play queue and the list. */
     private fun onDeleted(track: Track) {
+        val replace = pendingReplace?.takeIf { it.second == track.id }
+        pendingReplace = null
+        val newer = replace?.let { r -> _tracks.value?.firstOrNull { it.id == r.third } }
         controller?.let { c ->
             (0 until c.mediaItemCount)
                 .firstOrNull { c.getMediaItemAt(it).mediaId == track.id.toString() }
-                ?.let(c::removeMediaItem)
+                ?.let { index ->
+                    // A queued old version becomes the new one (the playing one has to stop).
+                    if (newer != null && index != c.currentMediaItemIndex) c.replaceMediaItem(index, newer.toMediaItem())
+                    else c.removeMediaItem(index)
+                }
+        }
+        if (replace != null) {
+            playlistStore.replaceTrack(track.id, replace.third)
+            downloader.replaced(replace.first)
         }
         refresh()
     }

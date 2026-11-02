@@ -1,5 +1,6 @@
 package io.github.maelmbange.thighhigh.download
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
@@ -9,9 +10,14 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.github.maelmbange.thighhigh.genre.Genre
+import io.github.maelmbange.thighhigh.genre.decodeExcerpt
 import io.github.maelmbange.thighhigh.genre.existingGenre
 import io.github.maelmbange.thighhigh.genre.tagGenre
 import io.github.maelmbange.thighhigh.library.MUSIC_RELATIVE_PATH
+import io.github.maelmbange.thighhigh.library.Track
+import io.github.maelmbange.thighhigh.library.scanLibrary
+import kotlin.math.abs
 import java.io.File
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -37,7 +43,10 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
-enum class DownloadStatus { Waiting, Downloading, Analyzing, Saving, Done, Failed, Canceled }
+enum class DownloadStatus { Waiting, Downloading, Analyzing, Saving, Comparing, Done, Duplicate, Failed, Canceled }
+
+/** A track of the library, as shown on a download's card. */
+data class Match(val trackId: Long, val title: String, val artist: String?)
 
 data class DownloadJob(
     val id: String,
@@ -47,8 +56,21 @@ data class DownloadJob(
     val percent: Float? = null,
     val status: DownloadStatus = DownloadStatus.Waiting,
     val error: String? = null,
+    /** Downloaded anyway, although this link is already in the library. */
+    val force: Boolean = false,
+    /** The new track, once saved. */
+    val trackId: Long? = null,
+    /** [DownloadStatus.Duplicate]: the track this link already gave, null when it is being downloaded right now. */
+    val existing: Match? = null,
+    /** An older track that sounds like the new one: the user picks one or keeps both. */
+    val similar: Match? = null,
+    /** The older version was deleted for this one. */
+    val replaced: Boolean = false,
 ) {
-    val isActive get() = status in setOf(DownloadStatus.Waiting, DownloadStatus.Downloading, DownloadStatus.Analyzing, DownloadStatus.Saving)
+    val isActive get() = status in setOf(
+        DownloadStatus.Waiting, DownloadStatus.Downloading, DownloadStatus.Analyzing,
+        DownloadStatus.Saving, DownloadStatus.Comparing,
+    )
 }
 
 /** How the last yt-dlp update check ended. */
@@ -84,6 +106,13 @@ private const val LAST_CHECK = "last_check"
 // Prefixes on yt-dlp's printed lines so they can be told apart.
 private const val TITLE = "[t]"
 private const val FILE = "[f]"
+private const val SOURCE = "[i]"
+
+/** Tracks this much longer or shorter can still be another upload of the same song (intro, outro). */
+private const val DURATION_SLACK_MS = 6_000L
+
+/** At most this many tracks of a close length are listened to after a download. */
+private const val MAX_CANDIDATES = 8
 
 /**
  * Downloads links with yt-dlp (bundled by youtubedl-android, with Python and
@@ -121,6 +150,11 @@ class Downloader(context: Context) {
 
     /** Held while yt-dlp is being replaced: downloads wait for it to finish. */
     private val updating = Mutex()
+
+    private val sources = SourceIndex(app)
+
+    /** The videos being downloaded right now, so the same one pasted twice runs once. */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** Downloads running yt-dlp right now; an update waits until there are none. */
     private val running = AtomicInteger(0)
@@ -177,8 +211,27 @@ class Downloader(context: Context) {
         }
     }
 
-    fun start(url: String) {
-        val job = DownloadJob(id = UUID.randomUUID().toString(), url = url.trim())
+    fun start(url: String) = start(DownloadJob(id = UUID.randomUUID().toString(), url = url.trim()))
+
+    /** Downloads a link that was stopped for being already in the library. */
+    fun downloadAnyway(id: String) {
+        val old = current(id)?.takeIf { it.status == DownloadStatus.Duplicate } ?: return
+        dismiss(id)
+        start(DownloadJob(id = UUID.randomUUID().toString(), url = old.url, title = old.title, force = true))
+    }
+
+    /** The user keeps both versions of a song that was downloaded again. */
+    fun keepBoth(id: String) = set(id) { it.copy(similar = null) }
+
+    /** The older version of [id]'s song was deleted: its link now counts for the new one. */
+    fun replaced(id: String) {
+        val job = current(id) ?: return
+        val old = job.similar ?: return
+        job.trackId?.let { sources.repoint(old.trackId, it) }
+        set(id) { it.copy(similar = null, replaced = true) }
+    }
+
+    private fun start(job: DownloadJob) {
         _jobs.update { listOf(job) + it }
         scope.launch {
             try {
@@ -213,21 +266,35 @@ class Downloader(context: Context) {
         if (current(job.id)?.status == DownloadStatus.Canceled) return
         set(job.id) { it.copy(status = DownloadStatus.Downloading) }
         val dir = File(app.cacheDir, "downloads/${job.id}").apply { mkdirs() }
+        var source: String? = null
         try {
-            val file = fetch(job, dir)
+            val file = fetch(job, dir) { source = it }
             detectGenre(job, file)
             set(job.id) { it.copy(status = DownloadStatus.Saving, percent = 100f) }
-            save(file)
-            set(job.id) { it.copy(status = DownloadStatus.Done) }
+            val trackId = save(file)
+            source?.let { sources.put(it, trackId) }
+            set(job.id) { it.copy(status = DownloadStatus.Comparing, trackId = trackId) }
             _added.tryEmit(Unit)
-        } catch (_: YoutubeDL.CanceledException) {
-            set(job.id) { it.copy(status = DownloadStatus.Canceled) }
+            val similar = try {
+                findSimilar(trackId)
+            } catch (e: Throwable) {
+                Log.w(TAG, "duplicate check failed", e)
+                null
+            }
+            set(job.id) { it.copy(status = DownloadStatus.Done, similar = similar) }
         } catch (e: Throwable) {
-            Log.e(TAG, "download failed", e)
-            if (current(job.id)?.status != DownloadStatus.Canceled) {
-                set(job.id) { it.copy(status = DownloadStatus.Failed, error = errorMessage(e)) }
+            when (current(job.id)?.status) {
+                // Stopped on purpose: the card already says why.
+                DownloadStatus.Duplicate, DownloadStatus.Canceled -> Unit
+                else -> if (e is YoutubeDL.CanceledException) {
+                    set(job.id) { it.copy(status = DownloadStatus.Canceled) }
+                } else {
+                    Log.e(TAG, "download failed", e)
+                    set(job.id) { it.copy(status = DownloadStatus.Failed, error = errorMessage(e)) }
+                }
             }
         } finally {
+            source?.let { inFlight.remove(it, job.id) }
             dir.deleteRecursively()
         }
     }
@@ -246,16 +313,71 @@ class Downloader(context: Context) {
         }
     }
 
+    /**
+     * Called with the video's key as soon as yt-dlp knows it, before the
+     * download: stops it when this video is already in the library or being
+     * downloaded by another card.
+     */
+    private fun checkSource(job: DownloadJob, source: String): Boolean {
+        val existing = if (job.force) null else sources.get(source)?.let(::trackInfo)
+        val other = inFlight.putIfAbsent(source, job.id)
+        if (existing == null && (other == null || other == job.id)) return true
+        if (other == null) inFlight.remove(source, job.id)
+        set(job.id) { it.copy(status = DownloadStatus.Duplicate, existing = existing, percent = null) }
+        YoutubeDL.getInstance().destroyProcessById(job.id)
+        return false
+    }
+
+    /** The library's track [id], or null if it was deleted since. */
+    private fun trackInfo(id: Long): Match? {
+        val projection = arrayOf(MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST)
+        return app.contentResolver.query(Track.uriOf(id), projection, null, null, null)?.use { c ->
+            if (!c.moveToFirst()) null
+            else Match(id, c.getString(0).orEmpty(), c.getString(1)?.takeIf { it != MediaStore.UNKNOWN_STRING })
+        }
+    }
+
+    /**
+     * Listens to the new track and to the library's tracks of about the same
+     * length: another upload of the same song (other link, other channel,
+     * re-encoded) has the same spectrum over time, whatever its title says.
+     */
+    private fun findSimilar(trackId: Long): Match? {
+        val library = scanLibrary(app)
+        val new = library.firstOrNull { it.id == trackId } ?: return null
+        val length = new.duration?.inWholeMilliseconds ?: return null
+        val candidates = library
+            .filter { it.id != trackId && it.path != null && it.duration != null }
+            .filter { abs(it.duration!!.inWholeMilliseconds - length) <= DURATION_SLACK_MS }
+            .sortedBy { abs(it.duration!!.inWholeMilliseconds - length) }
+            .take(MAX_CANDIDATES)
+        if (candidates.isEmpty()) return null
+        val mine = fingerprintOf(new) ?: return null
+        return candidates
+            .mapNotNull { t -> fingerprintOf(t)?.let { t to mine.similarity(it) } }
+            .filter { it.second >= Fingerprint.SAME_TRACK }
+            .maxByOrNull { it.second }
+            ?.first
+            ?.let { Match(it.id, it.title, it.artist) }
+    }
+
+    private fun fingerprintOf(track: Track): Fingerprint? = try {
+        Fingerprint.of(decodeExcerpt(track.path!!, track.duration!!.inWholeMilliseconds), Genre.sampleRate())
+    } catch (e: Throwable) {
+        Log.w(TAG, "could not listen to ${track.path}", e)
+        null
+    }
+
     /** Runs yt-dlp; retries without the cover if embedding it is what failed. */
-    private fun fetch(job: DownloadJob, dir: File): File = try {
-        fetchOnce(job, dir, embedThumbnail = true)
+    private fun fetch(job: DownloadJob, dir: File, onSource: (String) -> Unit): File = try {
+        fetchOnce(job, dir, embedThumbnail = true, onSource)
     } catch (e: YoutubeDLException) {
         val audio = dir.listFiles()?.firstOrNull { it.extension.lowercase() in AUDIO_EXTENSIONS }
         if (audio != null && e.message.orEmpty().contains("thumbnail", ignoreCase = true)) audio
         else throw e
     }
 
-    private fun fetchOnce(job: DownloadJob, dir: File, embedThumbnail: Boolean): File {
+    private fun fetchOnce(job: DownloadJob, dir: File, embedThumbnail: Boolean, onSource: (String) -> Unit): File {
         val request = YoutubeDLRequest(job.url).apply {
             addOption("--no-playlist")
             // Only the audio is kept: the best audio-only stream as-is (often
@@ -273,6 +395,7 @@ class Downloader(context: Context) {
             // --print implies --quiet: ask for the progress lines back.
             addOption("--newline")
             addOption("--progress")
+            addOption("--print", "before_dl:$SOURCE%(extractor_key)s %(id)s")
             addOption("--print", "before_dl:$TITLE%(title)s")
             addOption("--print", "after_move:$FILE%(filepath)s")
             addOption("-P", dir.absolutePath)
@@ -283,6 +406,9 @@ class Downloader(context: Context) {
             // Runs on the library's reader thread: an exception here would kill the app.
             runCatching {
                 when {
+                    line.startsWith(SOURCE) -> sourceKey(line.removePrefix(SOURCE))?.let { key ->
+                        if (checkSource(job, key)) onSource(key)
+                    }
                     line.startsWith(TITLE) -> set(job.id) { it.copy(title = line.removePrefix(TITLE).trim()) }
                     line.startsWith(FILE) -> path = line.removePrefix(FILE).trim()
                     progress > 0f -> set(job.id) { it.copy(percent = progress) }
@@ -300,7 +426,7 @@ class Downloader(context: Context) {
     }
 
     /** Copies the track into Music/thigh-high and has Android index its tags. */
-    private suspend fun save(file: File) {
+    private suspend fun save(file: File): Long {
         val resolver = app.contentResolver
         val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
@@ -327,6 +453,7 @@ class Downloader(context: Context) {
                 MediaScannerConnection.scanFile(app, arrayOf(path), null) { _, _ -> cont.resume(Unit) }
             }
         }
+        return ContentUris.parseId(uri)
     }
 
     private fun current(id: String) = _jobs.value.firstOrNull { it.id == id }

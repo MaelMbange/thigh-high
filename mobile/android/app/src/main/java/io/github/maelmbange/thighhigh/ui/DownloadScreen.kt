@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.download.DownloadJob
 import io.github.maelmbange.thighhigh.download.DownloadStatus
+import io.github.maelmbange.thighhigh.download.Match
+import androidx.compose.material3.ButtonDefaults
 import io.github.maelmbange.thighhigh.download.UpdateResult
 import io.github.maelmbange.thighhigh.download.parseLinks
 import androidx.compose.runtime.remember
@@ -60,6 +62,9 @@ fun DownloadScreen(
     onDismiss: (String) -> Unit,
     ytdlp: YtDlpState = YtDlpState(),
     onUpdateYtDlp: () -> Unit = {},
+    onDownloadAnyway: (String) -> Unit = {},
+    onKeepBoth: (String) -> Unit = {},
+    onReplaceOld: (DownloadJob) -> Unit = {},
 ) {
     var url by rememberSaveable { mutableStateOf("") }
     @Suppress("DEPRECATION")
@@ -118,7 +123,14 @@ fun DownloadScreen(
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(jobs, key = { it.id }) { job ->
-                JobCard(job, onCancel = { onCancel(job.id) }, onDismiss = { onDismiss(job.id) })
+                JobCard(
+                    job,
+                    onCancel = { onCancel(job.id) },
+                    onDismiss = { onDismiss(job.id) },
+                    onDownloadAnyway = { onDownloadAnyway(job.id) },
+                    onKeepBoth = { onKeepBoth(job.id) },
+                    onReplaceOld = { onReplaceOld(job) },
+                )
             }
         }
     }
@@ -171,8 +183,18 @@ private fun YtDlpRow(state: YtDlpState, onUpdate: () -> Unit) {
     }
 }
 
+/** « Titre » — Artiste, as the cards name a track of the library. */
+private fun Match.label() = if (artist.isNullOrBlank()) "« $title »" else "« $title » de $artist"
+
 @Composable
-private fun JobCard(job: DownloadJob, onCancel: () -> Unit, onDismiss: () -> Unit) {
+private fun JobCard(
+    job: DownloadJob,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+    onDownloadAnyway: () -> Unit = {},
+    onKeepBoth: () -> Unit = {},
+    onReplaceOld: () -> Unit = {},
+) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -183,7 +205,10 @@ private fun JobCard(job: DownloadJob, onCancel: () -> Unit, onDismiss: () -> Uni
                         ?: stringResource(R.string.download_starting)
                     DownloadStatus.Analyzing -> stringResource(R.string.download_analyzing)
                     DownloadStatus.Saving -> stringResource(R.string.download_saving)
-                    DownloadStatus.Done -> stringResource(R.string.download_done)
+                    DownloadStatus.Comparing -> stringResource(R.string.download_comparing)
+                    DownloadStatus.Done -> stringResource(if (job.replaced) R.string.download_replaced else R.string.download_done)
+                    DownloadStatus.Duplicate -> job.existing?.let { stringResource(R.string.download_duplicate, it.label()) }
+                        ?: stringResource(R.string.download_duplicate_running)
                     DownloadStatus.Canceled -> stringResource(R.string.download_canceled)
                     DownloadStatus.Failed -> job.error ?: stringResource(R.string.download_failed)
                 }
@@ -195,6 +220,22 @@ private fun JobCard(job: DownloadJob, onCancel: () -> Unit, onDismiss: () -> Uni
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
+                job.similar?.let { old ->
+                    Text(
+                        stringResource(R.string.download_similar, old.label()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextColors.title,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onReplaceOld) { Text(stringResource(R.string.download_replace)) }
+                        TextButton(onClick = onKeepBoth) { Text(stringResource(R.string.download_keep_both)) }
+                    }
+                }
+                if (job.status == DownloadStatus.Duplicate && job.existing != null) {
+                    TextButton(onClick = onDownloadAnyway, contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                        Text(stringResource(R.string.download_anyway))
+                    }
+                }
                 when {
                     job.status == DownloadStatus.Downloading && job.percent != null ->
                         LinearProgressIndicator(progress = { job.percent / 100f }, Modifier.fillMaxWidth())
