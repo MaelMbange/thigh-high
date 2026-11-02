@@ -14,11 +14,13 @@ Downloaded music is stored in your Music folder under `thigh-high`.
 
 The repository is a Cargo workspace:
 
-- `crates/core`: logic shared with the upcoming Android app (library and tags,
+- `crates/core`: logic shared with the Android app (library and tags,
   filters, cover-art colors, audio analysis for the animations, genre model).
   It never starts a process or picks a folder.
 - `crates/tui`: the terminal app (ratatui UI, playback and downloads through
   ffmpeg and yt-dlp).
+- `mobile/android`: the Android app (Kotlin, Jetpack Compose, Media3). See
+  `mobile/android/README.md`.
 - `assets`: the genre model and its mel filterbank.
 
 ## Now playing

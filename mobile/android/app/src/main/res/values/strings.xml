@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">thigh-high</string>
+    <string name="permission_needed">thigh-high a besoin d\'accéder à ta musique pour lister les morceaux téléchargés.</string>
+    <string name="permission_grant">Autoriser</string>
+    <string name="library_empty">Aucun morceau dans Music/thigh-high.\nCopie des fichiers audio dans ce dossier du téléphone.</string>
+    <string name="play">Lecture</string>
+    <string name="pause">Pause</string>
+    <string name="refresh">Actualiser</string>
+    <string name="unknown_artist">Artiste inconnu</string>
+</resources>
