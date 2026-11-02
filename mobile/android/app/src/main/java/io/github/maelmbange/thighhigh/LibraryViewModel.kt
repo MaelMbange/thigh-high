@@ -125,6 +125,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // yt-dlp is kept up to date in the background (at most daily).
+        downloader.autoUpdate()
         // A finished download shows up in the list right away.
         viewModelScope.launch { downloader.added.collect { refresh() } }
         viewModelScope.launch { genreScanner.changed.collect { refresh() } }

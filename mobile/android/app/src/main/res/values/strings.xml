@@ -80,6 +80,15 @@
     <string name="queue">À suivre</string>
     <string name="queue_empty">Rien après ce morceau.</string>
 
+    <string name="ytdlp">yt-dlp</string>
+    <string name="ytdlp_version">yt-dlp %1$s</string>
+    <string name="ytdlp_checking">Recherche d\'une mise à jour…</string>
+    <string name="ytdlp_updated">Mis à jour à l\'instant</string>
+    <string name="ytdlp_failed">Mise à jour impossible (hors ligne ?)</string>
+    <string name="ytdlp_checked">À jour · vérifié %1$s</string>
+    <string name="ytdlp_never">Jamais vérifié</string>
+    <string name="ytdlp_update">Mettre à jour</string>
+
     <plurals name="track_count">
         <item quantity="one">%1$d morceau</item>
         <item quantity="other">%1$d morceaux</item>

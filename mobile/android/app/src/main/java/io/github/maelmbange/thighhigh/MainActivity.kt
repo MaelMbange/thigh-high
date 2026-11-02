@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
         var menuOpen by remember { mutableStateOf(false) }
         val playback by viewModel.playback.collectAsStateWithLifecycle()
         val jobs by viewModel.downloader.jobs.collectAsStateWithLifecycle()
+        val ytdlp by viewModel.downloader.ytdlp.collectAsStateWithLifecycle()
         val cover by viewModel.cover.collectAsStateWithLifecycle()
         val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
         val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
@@ -311,6 +312,8 @@ class MainActivity : ComponentActivity() {
                         onDownload = viewModel.downloader::start,
                         onCancel = viewModel.downloader::cancel,
                         onDismiss = viewModel.downloader::dismiss,
+                        ytdlp = ytdlp,
+                        onUpdateYtDlp = viewModel.downloader::update,
                     )
                 }
             }
