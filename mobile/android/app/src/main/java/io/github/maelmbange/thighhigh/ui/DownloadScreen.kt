@@ -141,7 +141,11 @@ private fun YtDlpRow(state: YtDlpState, onUpdate: () -> Unit) {
             if (state.updating) {
                 CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
             } else {
-                TextButton(onClick = onUpdate) {
+                // Greyed out while yt-dlp is known to be current (checked within the day).
+                val upToDate = state.result == UpdateResult.UpToDate || state.result == UpdateResult.Updated ||
+                    (state.result == null && state.lastCheckMs > 0 &&
+                        System.currentTimeMillis() - state.lastCheckMs < 24 * 60 * 60 * 1000L)
+                TextButton(onClick = onUpdate, enabled = !upToDate) {
                     Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
                     Text(stringResource(R.string.ytdlp_update), Modifier.padding(start = 6.dp))
                 }
