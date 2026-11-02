@@ -3,6 +3,8 @@ package io.github.maelmbange.thighhigh.ui
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,37 +31,33 @@ import androidx.compose.material.icons.filled.RepeatOneOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -71,10 +69,8 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.playback.AudioTap
-import kotlin.math.PI
 import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
 @Composable
@@ -192,87 +188,130 @@ private fun CoverArt(cover: Cover, modifier: Modifier) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The seek bar as a row of bars dancing with the music: played bars in the
+ * cover's main color, the rest dimmed. The position dot rides on top of the
+ * bar under it. Tap or drag anywhere to seek.
+ */
 @Composable
 private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: () -> Long, onSeek: (Long) -> Unit) {
     var position by remember { mutableLongStateOf(positionMs()) }
-    // While the finger is on the slider, show where it is rather than the player.
-    var dragging by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableFloatStateOf(0f) }
+    // While the finger is on the bar, show where it is rather than the player.
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
             position = positionMs()
             delay(250)
         }
     }
-    // The played part of the bar ripples with the bass.
-    var bass by remember { mutableFloatStateOf(0f) }
-    var phase by remember { mutableFloatStateOf(0f) }
-    val playing by rememberUpdatedState(playback.isPlaying)
-    LaunchedEffect(Unit) {
-        var last = 0L
-        while (true) withFrameNanos { now ->
-            val dt = if (last == 0L) 0f else (now - last) / 1e9f
-            last = now
-            // Rise at once on a kick, fall back smoothly.
-            bass = max(AudioTap.bass(), bass * 0.88f)
-            if (playing) phase += dt * 6f
-        }
-    }
     val duration = playback.durationMs
-    val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    val fraction = dragFraction
+        ?: if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    val levels = rememberBarLevels()
+    val currentDuration by rememberUpdatedState(duration)
+    val seek by rememberUpdatedState(onSeek)
+
     Column(Modifier.padding(top = 16.dp)) {
-        Slider(
-            value = if (dragging) dragValue else fraction,
-            onValueChange = { dragging = true; dragValue = it },
-            onValueChangeFinished = {
-                onSeek((dragValue * duration).toLong())
-                position = (dragValue * duration).toLong()
-                dragging = false
-            },
-            enabled = duration > 0,
-            colors = SliderDefaults.colors(thumbColor = palette.primary, activeTrackColor = palette.primary),
-            track = { state ->
-                val range = state.valueRange.endInclusive - state.valueRange.start
-                WavyTrack(
-                    fraction = if (range > 0) (state.value - state.valueRange.start) / range else 0f,
-                    amplitude = bass,
-                    phase = phase,
-                    active = palette.primary,
-                    inactive = palette.primary.copy(alpha = 0.25f),
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        if (currentDuration > 0) {
+                            val f = (offset.x / size.width).coerceIn(0f, 1f)
+                            position = (f * currentDuration).toLong()
+                            seek(position)
+                        }
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragFraction = (it.x / size.width).coerceIn(0f, 1f) },
+                        onHorizontalDrag = { change, _ ->
+                            dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            dragFraction?.let { f ->
+                                position = (f * currentDuration).toLong()
+                                seek(position)
+                            }
+                            dragFraction = null
+                        },
+                        onDragCancel = { dragFraction = null },
+                    )
+                },
+        ) {
+            val bars = levels.value
+            val n = bars.size
+            val slot = size.width / n
+            val barWidth = slot * 0.62f
+            val mid = size.height / 2
+            val minHeight = 3.dp.toPx()
+            val maxHeight = size.height - 14.dp.toPx()
+            fun height(i: Int) = minHeight + bars[i] * (maxHeight - minHeight)
+            val playedX = size.width * fraction
+            for (i in 0 until n) {
+                val x = i * slot + (slot - barWidth) / 2
+                val h = height(i)
+                val color = if (x + barWidth / 2 <= playedX) palette.primary else palette.primary.copy(alpha = 0.28f)
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(x, mid - h / 2),
+                    size = Size(barWidth, h),
+                    cornerRadius = CornerRadius(barWidth / 2),
                 )
-            },
-        )
+            }
+            // The dot sits on the top edge of the bar under it, moving with it.
+            val under = (fraction * n).toInt().coerceIn(0, n - 1)
+            val radius = 6.dp.toPx()
+            drawCircle(Color.White, radius, Offset(playedX.coerceIn(radius, size.width - radius), mid - height(under) / 2))
+            drawCircle(palette.primary, radius * 0.6f, Offset(playedX.coerceIn(radius, size.width - radius), mid - height(under) / 2))
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            val shown = if (dragging) (dragValue * duration).toLong() else position
+            val shown = dragFraction?.let { (it * duration).toLong() } ?: position
             Text(formatMs(shown), style = MaterialTheme.typography.bodySmall)
             Text(formatMs(duration), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
-/** The played part is a sine wave whose height follows [amplitude] (0 to 1); the rest is flat. */
+/** Bars across the seek bar. */
+private const val BAR_COUNT = 48
+
+/**
+ * One level per bar, 0 to 1, updated every frame from the audio being heard:
+ * each bar follows the loudness of its slice of the current waveform, so the
+ * row ripples with the music, jumps on kicks and settles when paused.
+ */
 @Composable
-private fun WavyTrack(fraction: Float, amplitude: Float, phase: Float, active: Color, inactive: Color) {
-    Canvas(Modifier.fillMaxWidth().height(24.dp)) {
-        val mid = size.height / 2
-        val end = size.width * fraction.coerceIn(0f, 1f)
-        val stroke = 4.dp.toPx()
-        drawLine(inactive, Offset(end, mid), Offset(size.width, mid), stroke, StrokeCap.Round)
-        if (end <= 0f) return@Canvas
-        // Slight: at most 5 dp each way, plus a faint ripple even when quiet.
-        val height = (0.6f + amplitude * 4.4f).dp.toPx()
-        val wavelength = 28.dp.toPx()
-        val path = Path().apply {
-            moveTo(0f, mid)
-            var x = 0f
-            while (x < end) {
-                x = min(x + 2f, end)
-                lineTo(x, mid + height * sin(x / wavelength * 2f * PI.toFloat() - phase))
+private fun rememberBarLevels(): androidx.compose.runtime.State<FloatArray> {
+    val levels = remember { mutableStateOf(FloatArray(BAR_COUNT)) }
+    LaunchedEffect(Unit) {
+        val window = FloatArray(2048)
+        val smoothed = FloatArray(BAR_COUNT)
+        while (true) withFrameNanos {
+            val playing = AudioTap.waveform(window)
+            val chunk = window.size / BAR_COUNT
+            var loudest = 0f
+            val rms = FloatArray(BAR_COUNT) { b ->
+                var e = 0f
+                for (j in b * chunk until (b + 1) * chunk) e += window[j] * window[j]
+                sqrt(e / chunk).also { loudest = max(loudest, it) }
             }
+            // Relative to the loudest slice, so quiet tracks still move; scaled by
+            // the overall level so a quiet passage stays lower than a loud one.
+            val overall = (loudest / 0.3f).coerceIn(0f, 1f)
+            for (b in 0 until BAR_COUNT) {
+                val target = if (!playing || loudest == 0f) 0f
+                else (rms[b] / loudest) * (0.35f + 0.65f * overall)
+                // Rise at once, fall back smoothly.
+                smoothed[b] = if (target > smoothed[b]) target else smoothed[b] * 0.86f + target * 0.14f
+            }
+            levels.value = smoothed.copyOf()
         }
-        drawPath(path, active, style = Stroke(stroke, cap = StrokeCap.Round))
     }
+    return levels
 }
 
 private fun formatMs(ms: Long): String {

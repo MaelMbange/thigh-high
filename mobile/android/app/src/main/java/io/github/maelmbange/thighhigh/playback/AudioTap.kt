@@ -69,26 +69,6 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
         }
     }
 
-    private val bassWindow = FloatArray(2048)
-
-    /**
-     * How much bass is being heard now, 0 to 1: the loudness of the audio
-     * under ~150 Hz. Call from the UI thread only.
-     */
-    fun bass(): Float {
-        if (!waveform(bassWindow)) return 0f
-        val rate = synchronized(lock) { sampleRate }
-        val a = 1f - kotlin.math.exp(-2f * Math.PI.toFloat() * 150f / rate)
-        var low = 0f
-        var energy = 0f
-        for (s in bassWindow) {
-            low += a * (s - low)
-            energy += low * low
-        }
-        val rms = kotlin.math.sqrt(energy / bassWindow.size)
-        return (rms / 0.25f).coerceIn(0f, 1f)
-    }
-
     /**
      * Fills [out] with the samples being heard now, oldest first.
      * Returns false (and fills silence) when nothing is playing.
