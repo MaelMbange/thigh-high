@@ -83,6 +83,7 @@
     <string name="remove">Retirer</string>
     <string name="back">Retour</string>
     <string name="queue">À suivre</string>
+    <string name="queue_history">Déjà écoutés</string>
     <string name="queue_empty">Rien après ce morceau.</string>
 
     <string name="ytdlp">yt-dlp</string>

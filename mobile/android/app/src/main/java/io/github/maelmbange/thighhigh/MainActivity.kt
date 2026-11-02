@@ -186,6 +186,8 @@ class MainActivity : ComponentActivity() {
         val playlists by viewModel.playlists.collectAsStateWithLifecycle()
         val openPlaylistId by viewModel.openPlaylistId.collectAsStateWithLifecycle()
         val upNext by viewModel.upNext.collectAsStateWithLifecycle()
+        val history by viewModel.history.collectAsStateWithLifecycle()
+        val neighbors by viewModel.neighbors.collectAsStateWithLifecycle()
         // The track whose actions sheet is open, and the playlist it was pressed in.
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
         val current = tracks?.firstOrNull { it.id == playback.currentId }
@@ -392,7 +394,6 @@ class MainActivity : ComponentActivity() {
                     positionMs = viewModel::positionMs,
                     onMinimize = { viewModel.playerOpen.value = false },
                     onTogglePlay = viewModel::togglePlayPause,
-                    onStop = viewModel::stop,
                     onNext = { viewModel.next() },
                     onPrevious = { viewModel.previous() },
                     onSkipPrevious = { viewModel.skipPrevious() },
@@ -400,6 +401,8 @@ class MainActivity : ComponentActivity() {
                     onToggleShuffle = viewModel::toggleShuffle,
                     onSeek = { viewModel.seekTo(it) },
                     upNext = upNext,
+                    history = history,
+                    neighbors = neighbors,
                     onPlayQueued = viewModel::playQueued,
                     onRemoveQueued = viewModel::removeQueued,
                 )

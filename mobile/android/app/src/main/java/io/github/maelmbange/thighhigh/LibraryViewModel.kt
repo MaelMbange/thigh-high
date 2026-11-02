@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -68,6 +69,9 @@ data class PlaybackState(
 /** A track waiting in the queue, at [index] in the player's list. */
 data class QueueEntry(val index: Int, val id: Long?, val title: String, val artist: String?)
 
+/** The covers of the tracks before and after the current one, when known. */
+data class Neighbors(val previous: Cover? = null, val next: Cover? = null)
+
 /** The current track's cover and the colors taken from it. */
 data class Cover(val bitmap: Bitmap?, val palette: CoverPalette, val trackId: Long? = null)
 
@@ -109,6 +113,20 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** The playlist opened in the Playlists tab, or null for the list of playlists. */
     val openPlaylistId = MutableStateFlow<String?>(null)
 
+    private val _history = MutableStateFlow<List<QueueEntry>>(emptyList())
+    /** What already played from the queue, oldest first, in the order it played. */
+    val history: StateFlow<List<QueueEntry>> = _history.asStateFlow()
+
+    private val _neighbors = MutableStateFlow(Neighbors())
+    /** The covers on either side of the current one, loaded ahead for the swipe. */
+    val neighbors: StateFlow<Neighbors> = _neighbors.asStateFlow()
+
+    /** The ids of the tracks before and after the current one. */
+    private val neighborIds = MutableStateFlow<Pair<Long?, Long?>>(null to null)
+
+    /** Recently loaded covers, so a swipe back and forth never waits for one. */
+    private val coverCache = android.util.LruCache<Long, Cover>(12)
+
     private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
     /** What plays after the current track, in the order it will play (shuffle included). */
     val upNext: StateFlow<List<QueueEntry>> = _upNext.asStateFlow()
@@ -135,6 +153,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { genreScanner.changed.collect { refresh() } }
         viewModelScope.launch {
             playback.map { it.currentId }.distinctUntilChanged().collect { loadCover(it) }
+        }
+        viewModelScope.launch {
+            neighborIds.collect { (prev, next) ->
+                _neighbors.value = Neighbors(coverOf(prev), coverOf(next))
+            }
         }
         controllerFuture.addListener({
             val c = controllerFuture.get()
@@ -379,6 +402,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun syncState(player: Player) {
         _upNext.value = upNextOf(player)
+        _history.value = historyOf(player)
+        val prevId = player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+            ?.let { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        val nextId = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }
+            ?.let { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        neighborIds.value = prevId to nextId
         _playback.value = PlaybackState(
             currentId = player.currentMediaItem?.mediaId?.toLongOrNull(),
             isPlaying = player.isPlaying,
@@ -390,6 +419,27 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /** The tracks before the current one, oldest first, following the shuffle order when it is on. */
+    private fun historyOf(player: Player): List<QueueEntry> {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) return emptyList()
+        val entries = mutableListOf<QueueEntry>()
+        var i = player.currentMediaItemIndex
+        while (true) {
+            i = timeline.getPreviousWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+            if (i == C.INDEX_UNSET || i >= player.mediaItemCount) break
+            entries += player.getMediaItemAt(i).toEntry(i)
+        }
+        return entries.reversed()
+    }
+
+    private fun MediaItem.toEntry(index: Int) = QueueEntry(
+        index = index,
+        id = mediaId.toLongOrNull(),
+        title = mediaMetadata.title?.toString() ?: "?",
+        artist = mediaMetadata.artist?.toString(),
+    )
+
     /** The tracks after the current one, following the shuffle order when it is on. */
     private fun upNextOf(player: Player): List<QueueEntry> {
         val timeline = player.currentTimeline
@@ -399,30 +449,30 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         while (true) {
             i = timeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
             if (i == C.INDEX_UNSET || i >= player.mediaItemCount) break
-            val item = player.getMediaItemAt(i)
-            entries += QueueEntry(
-                index = i,
-                id = item.mediaId.toLongOrNull(),
-                title = item.mediaMetadata.title?.toString() ?: "?",
-                artist = item.mediaMetadata.artist?.toString(),
-            )
+            entries += player.getMediaItemAt(i).toEntry(i)
         }
         return entries
     }
 
     private suspend fun loadCover(id: Long?) {
+        _cover.value = coverOf(id) ?: Cover(null, CoverPalette.Default, null)
+    }
+
+    /** The cover of track [id] with its colors, from the cache or read once. */
+    private suspend fun coverOf(id: Long?): Cover? {
+        id ?: return null
+        coverCache.get(id)?.let { return it }
         val cover = withContext(Dispatchers.IO) {
-            val bitmap = id?.let {
-                try {
-                    getApplication<Application>().contentResolver
-                        .loadThumbnail(Track.uriOf(it), Size(768, 768), null)
-                } catch (_: Exception) {
-                    null // no embedded cover
-                }
+            val bitmap = try {
+                getApplication<Application>().contentResolver
+                    .loadThumbnail(Track.uriOf(id), Size(768, 768), null)
+            } catch (_: Exception) {
+                null // no embedded cover
             }
             Cover(bitmap, bitmap?.let(CoverPalette::from) ?: CoverPalette.Default, id)
         }
-        _cover.value = cover
+        coverCache.put(id, cover)
+        return cover
     }
 
     private companion object {

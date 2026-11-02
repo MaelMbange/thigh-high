@@ -88,6 +88,13 @@ import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.playback.AudioTap
 import kotlin.math.abs
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.ui.platform.LocalDensity
+import io.github.maelmbange.thighhigh.Neighbors
+import kotlinx.coroutines.Job
 import kotlin.math.max
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -113,7 +120,6 @@ fun PlayerScreen(
     positionMs: () -> Long,
     onMinimize: () -> Unit,
     onTogglePlay: () -> Unit,
-    onStop: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onCycleRepeat: () -> Unit,
@@ -121,92 +127,145 @@ fun PlayerScreen(
     onSeek: (Long) -> Unit,
     /** Always the previous track: a swipe never just restarts this one. */
     onSkipPrevious: () -> Unit = onPrevious,
+    neighbors: Neighbors = Neighbors(),
+    history: List<QueueEntry> = emptyList(),
     upNext: List<QueueEntry> = emptyList(),
     onPlayQueued: (Int) -> Unit = {},
     onRemoveQueued: (Int) -> Unit = {},
 ) {
-    var queueOpen by rememberSaveable { mutableStateOf(false) }
-    if (queueOpen) {
-        QueueSheet(upNext, onPlay = onPlayQueued, onRemove = onRemoveQueued, onDismiss = { queueOpen = false })
-    }
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
     val background = MaterialTheme.colorScheme.background
-    // How far the screen is pulled down by the finger. A vertical drag anywhere
-    // moves it with the finger; letting go with a downward flick (or past a
-    // third of the screen) minimizes, anything else springs back. The drag is
-    // read on the outer box, which never moves: read on the moving screen, each
-    // step would cancel the next and the screen would barely follow.
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+
+    // How far the screen is pulled down by the finger. A vertical drag moves it
+    // with the finger; letting go with a downward flick (or past a third of the
+    // screen) minimizes, anything else springs back. The drag is read on the
+    // outer box, which never moves: read on the moving screen, each step would
+    // cancel the next and the screen would barely follow.
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var screenHeight by remember { mutableFloatStateOf(1f) }
-    // Only a drag that starts on the cover or above it moves the screen; below
-    // it (title, seek bar, buttons) nothing happens. Both in window pixels.
+    // Only a drag down that starts on the cover or above it moves the screen;
+    // below it (title, seek bar, buttons) nothing happens. Window pixels.
     var screenTop by remember { mutableFloatStateOf(0f) }
     var dragZoneBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var dragAllowed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    // Changing track slides the picture: it follows the finger (or goes on
-    // its own after a button), leaves on one side, and the next track's
-    // picture comes in from the other. With nothing before the first track or
-    // after the last, the picture only gives a little and springs back.
-    val swipe = remember { Animatable(0f) }
-    var visualWidth by remember { mutableFloatStateOf(1f) }
-    // -1: leaving to the left (next), +1: to the right (previous), 0: none.
-    var leaving by remember { mutableIntStateOf(0) }
-    // The direction of the last change, for the title; 0 fades it.
-    var lastDirection by remember { mutableIntStateOf(0) }
-    // The cover drawn: it only changes once the old one has left.
-    var shownCover by remember { mutableStateOf(cover) }
-    val currentPlayback by rememberUpdatedState(playback)
-    fun skip(direction: Int) {
-        if (leaving != 0) return
-        leaving = direction
-        lastDirection = direction
-        if (direction < 0) onNext() else onSkipPrevious()
-        scope.launch {
-            swipe.animateTo(direction * visualWidth, tween(200, easing = FastOutLinearInEasing))
-            // The next cover normally arrives within a frame or two; if the
-            // track did not change after all, the picture comes back.
-            delay(1_500)
-            if (leaving == direction) {
-                leaving = 0
-                swipe.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+
+    // The "À suivre" panel: 0 hidden, 1 fully up. A drag up anywhere on the
+    // player pulls it up with the finger.
+    var queueShown by remember { mutableFloatStateOf(0f) }
+    var queueJob by remember { mutableStateOf<Job?>(null) }
+    fun settleQueue(velocity: Float) {
+        val open = when {
+            velocity < -800f -> true
+            velocity > 800f -> false
+            else -> queueShown > 0.35f
+        }
+        queueJob?.cancel()
+        queueJob = scope.launch {
+            animate(queueShown, if (open) 1f else 0f, animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { v, _ ->
+                queueShown = v
             }
         }
     }
-    LaunchedEffect(cover) {
-        if (cover.trackId == shownCover.trackId || leaving == 0) {
-            shownCover = cover
-            return@LaunchedEffect
-        }
-        val direction = leaving
-        // Wait for the old picture to be off screen, then bring the new one in.
-        while (leaving == direction && (swipe.isRunning || abs(swipe.value) < visualWidth * 0.99f)) withFrameNanos { }
-        shownCover = cover
-        if (leaving != direction) return@LaunchedEffect // gave up meanwhile
-        leaving = 0
-        swipe.snapTo(-direction * visualWidth)
-        swipe.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
-    }
-    val pullDown = Modifier.draggable(
+    BackHandler(enabled = queueShown > 0f) { settleQueue(1_000f) }
+
+    // What the current vertical drag does, decided by its first movement.
+    var verticalMode by remember { mutableIntStateOf(MODE_NONE) }
+    val vertical = Modifier.draggable(
         orientation = Orientation.Vertical,
         state = rememberDraggableState { delta ->
-            if (dragAllowed) dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+            if (verticalMode == MODE_NONE) {
+                verticalMode = when {
+                    queueShown > 0f || delta < 0f -> MODE_QUEUE
+                    dragAllowed -> MODE_DISMISS
+                    else -> MODE_IGNORED
+                }
+                if (verticalMode == MODE_QUEUE) queueJob?.cancel()
+            }
+            when (verticalMode) {
+                MODE_QUEUE -> queueShown = (queueShown - delta / screenHeight).coerceIn(0f, 1f)
+                MODE_DISMISS -> dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+            }
         },
+        onDragStarted = { verticalMode = MODE_NONE },
         onDragStopped = { velocity ->
-            if (!dragAllowed) return@draggable
-            val dismiss = when {
-                velocity > 800f -> true
-                velocity < -300f -> false
-                else -> dragOffset > screenHeight / 3
+            when (verticalMode) {
+                MODE_QUEUE -> settleQueue(velocity)
+                MODE_DISMISS -> {
+                    val dismiss = when {
+                        velocity > 800f -> true
+                        velocity < -300f -> false
+                        else -> dragOffset > screenHeight / 3
+                    }
+                    if (dismiss) onMinimize() else animate(dragOffset, 0f) { value, _ -> dragOffset = value }
+                }
             }
-            if (dismiss) {
-                onMinimize()
-            } else {
-                animate(dragOffset, 0f) { value, _ -> dragOffset = value }
-            }
+            verticalMode = MODE_NONE
         },
     )
+
+    // Changing track moves a strip of three pictures, previous / current /
+    // next, loaded ahead: the neighbour is already there under the finger, so
+    // the change never waits for a cover. With nothing before the first track
+    // or after the last, the strip only gives a little and springs back.
+    var visualWidth by remember { mutableFloatStateOf(1f) }
+    val gap = with(density) { 24.dp.toPx() }
+    var swipe by remember { mutableFloatStateOf(0f) }
+    var swipeJob by remember { mutableStateOf<Job?>(null) }
+    // The direction of the last change, for the title; 0 fades it.
+    var lastDirection by remember { mutableIntStateOf(0) }
+    // The pictures drawn. They are held still while the strip moves, and
+    // swapped in one frame when it lands.
+    var shownCover by remember { mutableStateOf(cover) }
+    var shownNeighbors by remember { mutableStateOf(neighbors) }
+    var moving by remember { mutableStateOf(false) }
+    // A cover change after a swipe is instant; one from the music going on by
+    // itself crossfades.
+    var instantSwap by remember { mutableStateOf(false) }
+    val currentPlayback by rememberUpdatedState(playback)
+    val next by rememberUpdatedState(onNext)
+    val skipPrevious by rememberUpdatedState(onSkipPrevious)
+
+    LaunchedEffect(cover) {
+        if (cover.trackId != shownCover.trackId) instantSwap = false
+        shownCover = cover
+    }
+    LaunchedEffect(neighbors, moving) { if (!moving) shownNeighbors = neighbors }
+
+    fun springBack() {
+        swipeJob?.cancel()
+        swipeJob = scope.launch {
+            animate(swipe, 0f, animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) { v, _ -> swipe = v }
+            moving = false
+        }
+    }
+
+    /** -1: on to the next track (the strip goes left), +1: back to the previous one. */
+    fun skip(direction: Int, velocity: Float = 0f) {
+        swipeJob?.cancel()
+        moving = true
+        lastDirection = direction
+        val page = visualWidth + gap
+        swipeJob = scope.launch {
+            animate(
+                swipe,
+                direction * page,
+                initialVelocity = velocity,
+                animationSpec = spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
+            ) { v, _ -> swipe = v }
+            // Landed on the neighbour: it becomes the current picture where it
+            // stands, and the strip is back at rest, in the same frame.
+            val target = if (direction < 0) shownNeighbors.next else shownNeighbors.previous
+            instantSwap = true
+            if (target != null) shownCover = target
+            swipe = 0f
+            if (direction < 0) next() else skipPrevious()
+            moving = false
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -226,7 +285,7 @@ fun PlayerScreen(
             // reaching the library and tabs drawn underneath. Nothing here may
             // consume touches: gestures still under their touch slop (a slow
             // drag) give up as soon as anything else consumes the movement.
-            .then(pullDown)
+            .then(vertical)
     ) {
     Column(
         Modifier
@@ -241,13 +300,6 @@ fun PlayerScreen(
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
             Box(Modifier.weight(1f))
-            IconButton(onClick = onToggleShuffle) {
-                if (playback.shuffle) Icon(Icons.Default.ShuffleOn, stringResource(R.string.shuffle_on), tint = palette.primary)
-                else Icon(Icons.Default.Shuffle, stringResource(R.string.shuffle_off))
-            }
-            IconButton(onClick = { queueOpen = true }) {
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.queue))
-            }
             IconButton(onClick = { showCover = !showCover }) {
                 if (showCover) Icon(Icons.Default.GraphicEq, stringResource(R.string.show_scope))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
@@ -263,39 +315,59 @@ fun PlayerScreen(
                 .pointerInput(Unit) {
                     val velocity = VelocityTracker()
                     detectHorizontalDragGestures(
-                        onDragStart = { velocity.resetTracking() },
+                        onDragStart = {
+                            swipeJob?.cancel()
+                            moving = true
+                            velocity.resetTracking()
+                        },
                         onDragEnd = {
                             val v = velocity.calculateVelocity().x
-                            val offset = swipe.value
                             val threshold = visualWidth / 4
                             val p = currentPlayback
                             when {
-                                p.hasNext && offset < 0 && (offset < -threshold || v < -1_000f) -> skip(-1)
-                                p.hasPrevious && offset > 0 && (offset > threshold || v > 1_000f) -> skip(1)
-                                else -> scope.launch { swipe.animateTo(0f, spring(dampingRatio = 0.7f)) }
+                                p.hasNext && swipe < 0 && (swipe < -threshold || v < -1_000f) -> skip(-1, v)
+                                p.hasPrevious && swipe > 0 && (swipe > threshold || v > 1_000f) -> skip(1, v)
+                                else -> springBack()
                             }
                         },
-                        onDragCancel = {
-                            scope.launch { swipe.animateTo(0f, spring(dampingRatio = 0.7f)) }
-                        },
+                        onDragCancel = { springBack() },
                     ) { change, dx ->
                         change.consume()
-                        if (leaving != 0) return@detectHorizontalDragGestures
                         velocity.addPosition(change.uptimeMillis, change.position)
                         val p = currentPlayback
-                        val next = swipe.value + dx
-                        val blocked = (next > 0 && !p.hasPrevious) || (next < 0 && !p.hasNext)
+                        val moved = swipe + dx
+                        val blocked = (moved > 0 && !p.hasPrevious) || (moved < 0 && !p.hasNext)
                         // At either end the picture resists, a tenth of the way at most.
-                        val target = if (blocked) {
-                            (swipe.value + dx * 0.25f).coerceIn(-visualWidth * 0.1f, visualWidth * 0.1f)
+                        swipe = if (blocked) {
+                            (swipe + dx * 0.25f).coerceIn(-visualWidth * 0.1f, visualWidth * 0.1f)
                         } else {
-                            next
+                            moved
                         }
-                        scope.launch { swipe.snapTo(target) }
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
+            val page = visualWidth + gap
+            // The neighbours, drawn only while the strip moves.
+            if (swipe != 0f) {
+                listOf(-1 to shownNeighbors.previous, 1 to shownNeighbors.next).forEach { (side, neighbour) ->
+                    if (neighbour != null) {
+                        CoverArt(
+                            neighbour,
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .graphicsLayer {
+                                    translationX = swipe + side * page
+                                    val f = 1f - (abs(translationX) / page).coerceIn(0f, 1f)
+                                    alpha = 0.4f + 0.6f * f
+                                    scaleX = 0.92f + 0.08f * f
+                                    scaleY = 0.92f + 0.08f * f
+                                },
+                        )
+                    }
+                }
+            }
             Crossfade(
                 showCover,
                 Modifier
@@ -306,17 +378,22 @@ fun PlayerScreen(
                         dragZoneBottom = it.positionInWindow().y + it.size.height - dragOffset
                     }
                     .graphicsLayer {
-                        translationX = swipe.value
-                        val f = (abs(swipe.value) / visualWidth).coerceIn(0f, 1f)
+                        translationX = swipe
+                        val f = (abs(swipe) / page).coerceIn(0f, 1f)
                         alpha = 1f - f * 0.6f
-                        // A slight tilt back as it moves away, like a card.
                         scaleX = 1f - f * 0.08f
                         scaleY = 1f - f * 0.08f
                     },
                 label = "visual",
             ) { coverShown ->
                 if (coverShown) {
-                    CoverArt(shownCover, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
+                    Crossfade(
+                        shownCover,
+                        animationSpec = if (instantSwap) snap() else tween(300),
+                        label = "cover",
+                    ) { c ->
+                        CoverArt(c, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
+                    }
                 } else {
                     Oscilloscope(palette, Modifier.fillMaxWidth().aspectRatio(1f))
                 }
@@ -363,7 +440,7 @@ fun PlayerScreen(
         val bass = rememberBassLevel()
 
         Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp),
+            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -394,10 +471,68 @@ fun PlayerScreen(
             IconButton(onClick = { if (playback.hasNext) skip(-1) }, Modifier.size(56.dp).pulse(bass, 1.5f), enabled = playback.hasNext) {
                 Icon(Icons.Default.SkipNext, stringResource(R.string.next), Modifier.size(36.dp))
             }
-            IconButton(onClick = onStop, Modifier.pulse(bass, 0.5f)) {
-                Icon(Icons.Default.Stop, stringResource(R.string.stop))
+            IconButton(onClick = onToggleShuffle, Modifier.pulse(bass, 0.5f)) {
+                if (playback.shuffle) Icon(Icons.Default.ShuffleOn, stringResource(R.string.shuffle_on), tint = palette.primary)
+                else Icon(Icons.Default.Shuffle, stringResource(R.string.shuffle_off))
             }
         }
+
+        // A faded strip at the bottom, like the list's refresh banner: tap it
+        // or drag up to see what comes next.
+        UpNextBanner(
+            Modifier.graphicsLayer { alpha = 1f - queueShown },
+            onClick = { settleQueue(-1_000f) },
+        )
+        }
+
+        if (queueShown > 0f) {
+            QueuePanel(
+                shown = { queueShown },
+                screenHeight = screenHeight,
+                history = history,
+                current = track,
+                upNext = upNext,
+                onDrag = { delta ->
+                    queueJob?.cancel()
+                    queueShown = (queueShown - delta / screenHeight).coerceIn(0f, 1f)
+                },
+                onSettle = ::settleQueue,
+                onPlay = onPlayQueued,
+                onRemove = onRemoveQueued,
+            )
+        }
+    }
+}
+
+private const val MODE_NONE = 0
+private const val MODE_DISMISS = 1
+private const val MODE_QUEUE = 2
+private const val MODE_IGNORED = 3
+
+@Composable
+private fun UpNextBanner(modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(TextColors.playing.copy(alpha = 0.04f), TextColors.playing.copy(alpha = 0.16f))
+                )
+            )
+            .clickable(onClick = onClick)
+            .height(36.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(18.dp), tint = TextColors.title.copy(alpha = 0.8f))
+            Text(
+                stringResource(R.string.queue),
+                Modifier.padding(start = 4.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = TextColors.title.copy(alpha = 0.8f),
+            )
         }
     }
 }

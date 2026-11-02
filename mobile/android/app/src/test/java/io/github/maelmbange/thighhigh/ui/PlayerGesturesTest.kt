@@ -8,6 +8,9 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsDisplayed
 import io.github.maelmbange.thighhigh.Cover
 import io.github.maelmbange.thighhigh.PlaybackState
 import io.github.maelmbange.thighhigh.library.Track
@@ -58,12 +61,13 @@ class PlayerGesturesTest {
                     positionMs = { 0L },
                     onMinimize = { minimized++ },
                     onTogglePlay = {},
-                    onStop = {},
+                    
                     onNext = { next++ },
                     onPrevious = { previous++ },
                     onCycleRepeat = {},
                     onToggleShuffle = {},
                     onSeek = {},
+                    upNext = listOf(io.github.maelmbange.thighhigh.QueueEntry(1, 2, "Morceau suivant", "Quelqu'un")),
                 )
             }
         }
@@ -91,7 +95,7 @@ class PlayerGesturesTest {
                             positionMs = { tick * 100L },
                             onMinimize = { minimized++; open = false },
                             onTogglePlay = {},
-                            onStop = {},
+                            
                             onNext = { next++ },
                             onPrevious = { previous++ },
                             onCycleRepeat = {},
@@ -216,5 +220,20 @@ class PlayerGesturesTest {
         rule.onRoot().performTouchInput { swipeLeft(startX = width * 0.6f, endX = width * 0.45f, durationMillis = 60) }
         rule.mainClock.advanceTimeBy(2_000)
         assertEquals(1, next)
+    }
+
+    @Test fun slowDragUpOpensTheQueue() {
+        show()
+        rule.onRoot().performTouchInput { swipeUp(startY = height * 0.8f, endY = height * 0.2f, durationMillis = 1_200) }
+        rule.mainClock.advanceTimeBy(2_000)
+        rule.onNodeWithText("Morceau suivant").assertIsDisplayed()
+        assertEquals(0, minimized)
+    }
+
+    @Test fun smallDragUpFallsBack() {
+        show()
+        rule.onRoot().performTouchInput { swipeUp(startY = height * 0.8f, endY = height * 0.75f, durationMillis = 800) }
+        rule.mainClock.advanceTimeBy(2_000)
+        rule.onNodeWithText("Morceau suivant").assertDoesNotExist()
     }
 }
