@@ -405,11 +405,14 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
     var offset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Box(
+        // Drawn only while the row is pulled aside, and only as wide as the gap:
+        // a closed row hides nothing behind it, so no red can show at its
+        // edges (when the list is pulled down to refresh, for instance).
+        if (offset < 0f) Box(
             Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(actionWidth)
+                .width(with(LocalDensity.current) { (-offset).toDp() })
                 .background(Catppuccin.Red)
                 .clickable {
                     scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
