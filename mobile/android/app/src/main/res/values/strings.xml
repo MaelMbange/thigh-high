@@ -38,6 +38,12 @@
     <string name="minimize">Réduire</string>
     <string name="show_cover">Afficher la pochette</string>
     <string name="show_scope">Afficher l\'oscilloscope</string>
+    <string name="show_lyrics">Afficher les paroles</string>
+    <string name="lyrics_loading">Recherche des paroles…</string>
+    <string name="lyrics_offline">Pas de connexion : les paroles n\'ont pas pu être cherchées.</string>
+    <string name="lyrics_retry">Réessayer</string>
+    <string name="lyrics_instrumental">Morceau instrumental</string>
+    <string name="lyrics_not_found">Pas de paroles trouvées pour ce morceau.</string>
     <string name="next">Suivant</string>
     <string name="delete">Supprimer</string>
     <string name="previous">Précédent</string>

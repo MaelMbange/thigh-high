@@ -5,6 +5,8 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.material.icons.filled.Lyrics
+import io.github.maelmbange.thighhigh.LyricsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.rememberCoroutineScope
@@ -132,9 +134,17 @@ fun PlayerScreen(
     upNext: List<QueueEntry> = emptyList(),
     onPlayQueued: (Int) -> Unit = {},
     onRemoveQueued: (Int) -> Unit = {},
+    lyrics: LyricsState = LyricsState.Loading,
+    onLyricsShown: (Boolean) -> Unit = {},
+    onRetryLyrics: () -> Unit = {},
 ) {
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
+    // The lyrics are looked up only while they are on screen.
+    androidx.compose.runtime.DisposableEffect(showCover) {
+        onLyricsShown(!showCover)
+        onDispose { onLyricsShown(false) }
+    }
     val background = MaterialTheme.colorScheme.background
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -305,7 +315,7 @@ fun PlayerScreen(
             }
             Box(Modifier.weight(1f))
             IconButton(onClick = { showCover = !showCover }) {
-                if (showCover) Icon(Icons.Default.GraphicEq, stringResource(R.string.show_scope))
+                if (showCover) Icon(Icons.Default.Lyrics, stringResource(R.string.show_lyrics))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
             }
         }
@@ -404,7 +414,16 @@ fun PlayerScreen(
                         CoverArt(c, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
                     }
                 } else {
-                    Oscilloscope(palette, Modifier.fillMaxWidth().aspectRatio(1f))
+                    // In place of the oscilloscope (kept in Oscilloscope.kt for later).
+                    LyricsView(
+                        lyrics,
+                        palette,
+                        positionMs,
+                        playback.durationMs,
+                        onSeek,
+                        onRetryLyrics,
+                        Modifier.fillMaxWidth().aspectRatio(1f),
+                    )
                 }
             }
         }

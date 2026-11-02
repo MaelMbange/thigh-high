@@ -200,6 +200,7 @@ class MainActivity : ComponentActivity() {
         val openPlaylistId by viewModel.openPlaylistId.collectAsStateWithLifecycle()
         val upNext by viewModel.upNext.collectAsStateWithLifecycle()
         val history by viewModel.history.collectAsStateWithLifecycle()
+        val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
         val neighbors by viewModel.neighbors.collectAsStateWithLifecycle()
         // The track whose actions sheet is open, and the playlist it was pressed in.
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
@@ -424,6 +425,9 @@ class MainActivity : ComponentActivity() {
                     neighbors = neighbors,
                     onPlayQueued = viewModel::playQueued,
                     onRemoveQueued = viewModel::removeQueued,
+                    lyrics = lyrics,
+                    onLyricsShown = { viewModel.lyricsShown.value = it },
+                    onRetryLyrics = viewModel::retryLyrics,
                 )
             }
         }

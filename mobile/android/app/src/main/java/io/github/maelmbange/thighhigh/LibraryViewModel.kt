@@ -36,6 +36,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
+import io.github.maelmbange.thighhigh.lyrics.Lyrics
+import io.github.maelmbange.thighhigh.lyrics.LyricsRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,6 +86,14 @@ data class Neighbors(val previous: Cover? = null, val next: Cover? = null)
 
 /** The current track's cover and the colors taken from it. */
 data class Cover(val bitmap: Bitmap?, val palette: CoverPalette, val trackId: Long? = null)
+
+/** Where the playing track's lyrics stand. */
+sealed interface LyricsState {
+    data object Loading : LyricsState
+    data class Ready(val lyrics: Lyrics) : LyricsState
+    /** No connection, and the lyrics were never kept: try again later. */
+    data object Offline : LyricsState
+}
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _tracks = MutableStateFlow<List<Track>?>(null)
@@ -149,6 +161,20 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             SessionToken(app, ComponentName(app, PlaybackService::class.java)),
         ).buildAsync()
 
+    private val lyricsRepository = LyricsRepository(app)
+
+    /** Whether the lyrics are on screen: only then are they looked up. */
+    val lyricsShown = MutableStateFlow(false)
+
+    /** Bumped by "Réessayer" after a failed lookup. */
+    private val lyricsRetry = MutableStateFlow(0)
+
+    private val _lyrics = MutableStateFlow<LyricsState>(LyricsState.Loading)
+    /** The lyrics of the playing track. */
+    val lyrics: StateFlow<LyricsState> = _lyrics.asStateFlow()
+
+    fun retryLyrics() = lyricsRetry.update { it + 1 }
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = syncState(player)
     }
@@ -161,6 +187,23 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { genreScanner.changed.collect { refresh() } }
         viewModelScope.launch {
             playback.map { it.currentId }.distinctUntilChanged().collect { loadCover(it) }
+        }
+        viewModelScope.launch {
+            val current = combine(playback.map { it.currentId }.distinctUntilChanged(), _tracks) { id, tracks ->
+                tracks?.firstOrNull { it.id == id }
+            }.distinctUntilChanged()
+            combine(current, lyricsShown, lyricsRetry) { track, shown, _ -> track.takeIf { shown } }
+                .collectLatest { track ->
+                    if (track == null) return@collectLatest
+                    _lyrics.value = LyricsState.Loading
+                    _lyrics.value = try {
+                        LyricsState.Ready(lyricsRepository.load(track))
+                    } catch (e: java.io.IOException) {
+                        LyricsState.Offline
+                    } catch (e: org.json.JSONException) {
+                        LyricsState.Ready(Lyrics.NotFound)
+                    }
+                }
         }
         viewModelScope.launch {
             neighborIds.collect { (prev, next) ->
