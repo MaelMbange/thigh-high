@@ -420,9 +420,19 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
                 },
             contentAlignment = Alignment.Center,
         ) {
+            // The icon and the label each appear only once the gap is wide
+            // enough to hold them, so neither gets cut while the row slides.
+            val revealed = with(LocalDensity.current) { (-offset).toDp() }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Delete, null, tint = Catppuccin.Crust)
-                Text(stringResource(R.string.delete), color = Catppuccin.Crust, style = MaterialTheme.typography.labelMedium)
+                if (revealed >= 40.dp) Icon(Icons.Default.Delete, null, tint = Catppuccin.Crust)
+                if (revealed >= actionWidth - 8.dp) {
+                    Text(
+                        stringResource(R.string.delete),
+                        color = Catppuccin.Crust,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
+                }
             }
         }
         Box(
