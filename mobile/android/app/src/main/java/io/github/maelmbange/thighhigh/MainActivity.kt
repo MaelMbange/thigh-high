@@ -6,11 +6,15 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,6 +49,7 @@ import io.github.maelmbange.thighhigh.ui.DownloadScreen
 import io.github.maelmbange.thighhigh.ui.LibraryScreen
 import io.github.maelmbange.thighhigh.ui.MiniPlayer
 import io.github.maelmbange.thighhigh.ui.PermissionScreen
+import io.github.maelmbange.thighhigh.ui.PlayerScreen
 import io.github.maelmbange.thighhigh.ui.ThighHighTheme
 
 class MainActivity : ComponentActivity() {
@@ -105,6 +110,8 @@ class MainActivity : ComponentActivity() {
         val tracks by viewModel.tracks.collectAsStateWithLifecycle()
         val playback by viewModel.playback.collectAsStateWithLifecycle()
         val jobs by viewModel.downloader.jobs.collectAsStateWithLifecycle()
+        val cover by viewModel.cover.collectAsStateWithLifecycle()
+        val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
         val current = tracks?.firstOrNull { it.id == playback.currentId }
 
         Scaffold(
@@ -130,7 +137,12 @@ class MainActivity : ComponentActivity() {
             bottomBar = {
                 Column {
                     if (current != null) {
-                        MiniPlayer(current, playback.isPlaying, viewModel::togglePlayPause)
+                        MiniPlayer(
+                            current,
+                            playback.isPlaying,
+                            onOpen = { viewModel.playerOpen.value = true },
+                            onTogglePlay = viewModel::togglePlayPause,
+                        )
                     }
                     NavigationBar {
                         NavigationBarItem(
@@ -163,6 +175,31 @@ class MainActivity : ComponentActivity() {
                         onDismiss = viewModel.downloader::dismiss,
                     )
                 }
+            }
+        }
+
+        // The full-screen player slides over the tabs; minimizing it (top-left
+        // button or Back) only hides it, the music keeps playing.
+        AnimatedVisibility(
+            visible = playerOpen && current != null,
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it },
+        ) {
+            current?.let { track ->
+                BackHandler { viewModel.playerOpen.value = false }
+                PlayerScreen(
+                    track = track,
+                    playback = playback,
+                    cover = cover,
+                    positionMs = viewModel::positionMs,
+                    onMinimize = { viewModel.playerOpen.value = false },
+                    onTogglePlay = viewModel::togglePlayPause,
+                    onStop = viewModel::stop,
+                    onNext = { viewModel.next() },
+                    onPrevious = { viewModel.previous() },
+                    onCycleRepeat = viewModel::cycleRepeat,
+                    onSeek = { viewModel.seekTo(it) },
+                )
             }
         }
     }

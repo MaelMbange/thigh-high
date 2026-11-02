@@ -89,8 +89,8 @@ private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun MiniPlayer(track: Track, isPlaying: Boolean, onTogglePlay: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+fun MiniPlayer(track: Track, isPlaying: Boolean, onOpen: () -> Unit, onTogglePlay: () -> Unit) {
+    Surface(onClick = onOpen, color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             HorizontalDivider()
             Row(

@@ -2,6 +2,8 @@ package io.github.maelmbange.thighhigh
 
 import android.app.Application
 import android.content.ComponentName
+import android.graphics.Bitmap
+import android.util.Size
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,19 +16,40 @@ import com.google.common.util.concurrent.ListenableFuture
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.library.scanLibrary
 import io.github.maelmbange.thighhigh.playback.PlaybackService
+import io.github.maelmbange.thighhigh.ui.CoverPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class Tab { Library, Download }
+
+/** Off → whole list → current track, like the terminal app's loop key. */
+enum class Repeat(val mode: Int) {
+    Off(Player.REPEAT_MODE_OFF),
+    All(Player.REPEAT_MODE_ALL),
+    One(Player.REPEAT_MODE_ONE);
+
+    fun next() = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        fun of(mode: Int) = entries.firstOrNull { it.mode == mode } ?: Off
+    }
+}
 
 data class PlaybackState(
     val currentId: Long? = null,
     val isPlaying: Boolean = false,
+    val durationMs: Long = 0L,
+    val repeat: Repeat = Repeat.Off,
 )
+
+/** The current track's cover and the colors taken from it. */
+data class Cover(val bitmap: Bitmap?, val palette: CoverPalette)
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _tracks = MutableStateFlow<List<Track>?>(null)
@@ -36,8 +59,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _playback = MutableStateFlow(PlaybackState())
     val playback: StateFlow<PlaybackState> = _playback.asStateFlow()
 
+    private val _cover = MutableStateFlow(Cover(null, CoverPalette.Default))
+    val cover: StateFlow<Cover> = _cover.asStateFlow()
+
     /** The screen picked in the bottom bar; kept here so it survives rotation. */
     val tab = MutableStateFlow(Tab.Library)
+
+    /** Whether the full-screen player is shown over the tabs. */
+    val playerOpen = MutableStateFlow(false)
 
     val downloader = getApplication<ThighHighApp>().downloader
 
@@ -55,6 +84,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // A finished download shows up in the list right away.
         viewModelScope.launch { downloader.added.collect { refresh() } }
+        viewModelScope.launch {
+            playback.map { it.currentId }.distinctUntilChanged().collect { loadCover(it) }
+        }
         controllerFuture.addListener({
             val c = controllerFuture.get()
             controller = c
@@ -69,8 +101,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Plays [track], queueing the whole list so next/previous follow it. */
+    /** Plays [track], queueing the whole list so next/previous follow it, and opens the player. */
     fun play(track: Track) {
+        playerOpen.value = true
         val c = controller ?: return
         val list = _tracks.value ?: return
         if (_playback.value.currentId == track.id) {
@@ -87,13 +120,50 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         if (c.isPlaying) c.pause() else c.play()
     }
 
+    /** Pauses and goes back to the start of the track. */
+    fun stop() {
+        val c = controller ?: return
+        c.pause()
+        c.seekTo(0L)
+    }
+
+    fun next() = controller?.seekToNext()
+
+    /** Back to the start of the track, or the previous one in its first seconds. */
+    fun previous() = controller?.seekToPrevious()
+
+    fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
+
+    fun cycleRepeat() {
+        val c = controller ?: return
+        c.repeatMode = Repeat.of(c.repeatMode).next().mode
+    }
+
+    /** Polled by the player screen for its progress bar. */
+    fun positionMs(): Long = controller?.currentPosition ?: 0L
+
     private fun syncState(player: Player) {
-        _playback.update {
-            PlaybackState(
-                currentId = player.currentMediaItem?.mediaId?.toLongOrNull(),
-                isPlaying = player.isPlaying,
-            )
+        _playback.value = PlaybackState(
+            currentId = player.currentMediaItem?.mediaId?.toLongOrNull(),
+            isPlaying = player.isPlaying,
+            durationMs = player.duration.coerceAtLeast(0L),
+            repeat = Repeat.of(player.repeatMode),
+        )
+    }
+
+    private suspend fun loadCover(id: Long?) {
+        val cover = withContext(Dispatchers.IO) {
+            val bitmap = id?.let {
+                try {
+                    getApplication<Application>().contentResolver
+                        .loadThumbnail(Track.uriOf(it), Size(768, 768), null)
+                } catch (_: Exception) {
+                    null // no embedded cover
+                }
+            }
+            Cover(bitmap, bitmap?.let(CoverPalette::from) ?: CoverPalette.Default)
         }
+        _cover.value = cover
     }
 
     override fun onCleared() {

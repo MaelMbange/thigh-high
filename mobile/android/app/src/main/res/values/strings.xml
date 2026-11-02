@@ -22,6 +22,15 @@
     <string name="download_done">Ajouté à la bibliothèque</string>
     <string name="download_canceled">Annulé</string>
     <string name="download_failed">Échec du téléchargement</string>
+    <string name="minimize">Réduire</string>
+    <string name="show_cover">Afficher la pochette</string>
+    <string name="show_scope">Afficher l\'oscilloscope</string>
+    <string name="next">Suivant</string>
+    <string name="previous">Précédent</string>
+    <string name="stop">Stop</string>
+    <string name="repeat_off">Boucle désactivée</string>
+    <string name="repeat_all">Boucle sur la liste</string>
+    <string name="repeat_one">Boucle sur le morceau</string>
     <string name="cancel">Annuler</string>
     <string name="dismiss">Retirer</string>
 </resources>
