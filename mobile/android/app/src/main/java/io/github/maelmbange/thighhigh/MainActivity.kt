@@ -14,7 +14,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
@@ -172,6 +187,9 @@ class MainActivity : ComponentActivity() {
         // The track whose actions sheet is open, and the playlist it was pressed in.
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
         val current = tracks?.firstOrNull { it.id == playback.currentId }
+        // Kept so the mini player can fold away with its last track shown.
+        var lastTrack by remember { mutableStateOf<Track?>(null) }
+        if (current != null) lastTrack = current
 
         Scaffold(
             topBar = {
@@ -224,9 +242,15 @@ class MainActivity : ComponentActivity() {
             },
             bottomBar = {
                 Column {
-                    if (current != null) {
+                    // The mini player unfolds above the tabs when a track is loaded.
+                    AnimatedVisibility(
+                        visible = current != null,
+                        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                        exit = shrinkVertically() + fadeOut(),
+                    ) {
+                        val track = current ?: lastTrack ?: return@AnimatedVisibility
                         MiniPlayer(
-                            current,
+                            track,
                             playback.isPlaying,
                             durationMs = playback.durationMs,
                             positionMs = viewModel::positionMs,
@@ -262,7 +286,18 @@ class MainActivity : ComponentActivity() {
                 }
             },
         ) { padding ->
-            Box(Modifier.padding(padding)) {
+            // Tabs slide toward the side of the tab picked.
+            AnimatedContent(
+                tab,
+                Modifier.padding(padding),
+                transitionSpec = {
+                    val d = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { d * it / 5 } + fadeIn(tween(250, delayMillis = 50))) togetherWith
+                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -d * it / 5 } + fadeOut(tween(150)))
+                },
+                label = "tab",
+            ) { tab ->
+              Box(Modifier.fillMaxSize()) {
                 when (tab) {
                     Tab.Library -> if (granted) {
                         LibraryScreen(
@@ -316,6 +351,7 @@ class MainActivity : ComponentActivity() {
                         onUpdateYtDlp = viewModel.downloader::update,
                     )
                 }
+              }
             }
         }
 
@@ -335,10 +371,15 @@ class MainActivity : ComponentActivity() {
 
         // The full-screen player slides over the tabs; minimizing it (top-left
         // button or Back) only hides it, the music keeps playing.
+        // Opening rises with a soft spring; minimizing sinks it toward the
+        // mini player, shrinking and fading a little on the way.
         AnimatedVisibility(
             visible = playerOpen && current != null,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
+            enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { it } +
+                fadeIn(tween(200)),
+            exit = slideOutVertically(tween(340, easing = FastOutSlowInEasing)) { it } +
+                scaleOut(tween(340), targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 1f)) +
+                fadeOut(tween(340, delayMillis = 60)),
         ) {
             current?.let { track ->
                 BackHandler { viewModel.playerOpen.value = false }
@@ -352,6 +393,7 @@ class MainActivity : ComponentActivity() {
                     onStop = viewModel::stop,
                     onNext = { viewModel.next() },
                     onPrevious = { viewModel.previous() },
+                    onSkipPrevious = { viewModel.skipPrevious() },
                     onCycleRepeat = viewModel::cycleRepeat,
                     onToggleShuffle = viewModel::toggleShuffle,
                     onSeek = { viewModel.seekTo(it) },

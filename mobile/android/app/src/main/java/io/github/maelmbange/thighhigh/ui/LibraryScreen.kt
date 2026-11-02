@@ -43,6 +43,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -255,6 +261,8 @@ private fun BoxScope.LibraryList(
             )
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(tracks, key = { it.id }) { track ->
+                    // Rows glide into place when the search or filter changes.
+                    Box(Modifier.animateItem()) {
                     SwipeToReveal(onAction = { onDelete(track) }) {
                         TrackRow(
                             track,
@@ -262,6 +270,7 @@ private fun BoxScope.LibraryList(
                             animate = isPlaying,
                             onLongClick = { onTrackLongClick(track) },
                         ) { onTrackClick(track) }
+                    }
                     }
                 }
             }
@@ -344,7 +353,16 @@ fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Column(Modifier.weight(1f)) {
+                AnimatedContent(
+                    track,
+                    Modifier.weight(1f),
+                    contentKey = { it.id },
+                    transitionSpec = {
+                        (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut())
+                    },
+                    label = "mini",
+                ) { track ->
+                Column {
                     Text(
                         track.title,
                         maxLines = 1,
@@ -359,6 +377,7 @@ fun MiniPlayer(
                         style = MaterialTheme.typography.bodySmall,
                         color = ListColors.artist,
                     )
+                }
                 }
                 FilledIconButton(
                     onClick = onTogglePlay,

@@ -87,7 +87,21 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.playback.AudioTap
+import kotlin.math.abs
 import kotlin.math.max
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
@@ -105,6 +119,8 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
     onSeek: (Long) -> Unit,
+    /** Always the previous track: a swipe never just restarts this one. */
+    onSkipPrevious: () -> Unit = onPrevious,
     upNext: List<QueueEntry> = emptyList(),
     onPlayQueued: (Int) -> Unit = {},
     onRemoveQueued: (Int) -> Unit = {},
@@ -129,9 +145,49 @@ fun PlayerScreen(
     var dragZoneBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var dragAllowed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    // Horizontal swipe on the cover / oscilloscope: next or previous track.
-    var swipeOffset by remember { mutableFloatStateOf(0f) }
+    // Changing track slides the picture: it follows the finger (or goes on
+    // its own after a button), leaves on one side, and the next track's
+    // picture comes in from the other. With nothing before the first track or
+    // after the last, the picture only gives a little and springs back.
+    val swipe = remember { Animatable(0f) }
     var visualWidth by remember { mutableFloatStateOf(1f) }
+    // -1: leaving to the left (next), +1: to the right (previous), 0: none.
+    var leaving by remember { mutableIntStateOf(0) }
+    // The direction of the last change, for the title; 0 fades it.
+    var lastDirection by remember { mutableIntStateOf(0) }
+    // The cover drawn: it only changes once the old one has left.
+    var shownCover by remember { mutableStateOf(cover) }
+    val currentPlayback by rememberUpdatedState(playback)
+    fun skip(direction: Int) {
+        if (leaving != 0) return
+        leaving = direction
+        lastDirection = direction
+        if (direction < 0) onNext() else onSkipPrevious()
+        scope.launch {
+            swipe.animateTo(direction * visualWidth, tween(200, easing = FastOutLinearInEasing))
+            // The next cover normally arrives within a frame or two; if the
+            // track did not change after all, the picture comes back.
+            delay(1_500)
+            if (leaving == direction) {
+                leaving = 0
+                swipe.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+            }
+        }
+    }
+    LaunchedEffect(cover) {
+        if (cover.trackId == shownCover.trackId || leaving == 0) {
+            shownCover = cover
+            return@LaunchedEffect
+        }
+        val direction = leaving
+        // Wait for the old picture to be off screen, then bring the new one in.
+        while (leaving == direction && (swipe.isRunning || abs(swipe.value) < visualWidth * 0.99f)) withFrameNanos { }
+        shownCover = cover
+        if (leaving != direction) return@LaunchedEffect // gave up meanwhile
+        leaving = 0
+        swipe.snapTo(-direction * visualWidth)
+        swipe.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
+    }
     val pullDown = Modifier.draggable(
         orientation = Orientation.Vertical,
         state = rememberDraggableState { delta ->
@@ -204,23 +260,38 @@ fun PlayerScreen(
                 .weight(1f)
                 .onSizeChanged { visualWidth = it.width.toFloat() }
                 // Swipe left for the next track, right for the previous one.
-                // The picture follows the finger, then slides back into place.
                 .pointerInput(Unit) {
+                    val velocity = VelocityTracker()
                     detectHorizontalDragGestures(
+                        onDragStart = { velocity.resetTracking() },
                         onDragEnd = {
+                            val v = velocity.calculateVelocity().x
+                            val offset = swipe.value
                             val threshold = visualWidth / 4
+                            val p = currentPlayback
                             when {
-                                swipeOffset < -threshold -> onNext()
-                                swipeOffset > threshold -> onPrevious()
+                                p.hasNext && offset < 0 && (offset < -threshold || v < -1_000f) -> skip(-1)
+                                p.hasPrevious && offset > 0 && (offset > threshold || v > 1_000f) -> skip(1)
+                                else -> scope.launch { swipe.animateTo(0f, spring(dampingRatio = 0.7f)) }
                             }
-                            scope.launch { animate(swipeOffset, 0f) { v, _ -> swipeOffset = v } }
                         },
                         onDragCancel = {
-                            scope.launch { animate(swipeOffset, 0f) { v, _ -> swipeOffset = v } }
+                            scope.launch { swipe.animateTo(0f, spring(dampingRatio = 0.7f)) }
                         },
                     ) { change, dx ->
                         change.consume()
-                        swipeOffset += dx
+                        if (leaving != 0) return@detectHorizontalDragGestures
+                        velocity.addPosition(change.uptimeMillis, change.position)
+                        val p = currentPlayback
+                        val next = swipe.value + dx
+                        val blocked = (next > 0 && !p.hasPrevious) || (next < 0 && !p.hasNext)
+                        // At either end the picture resists, a tenth of the way at most.
+                        val target = if (blocked) {
+                            (swipe.value + dx * 0.25f).coerceIn(-visualWidth * 0.1f, visualWidth * 0.1f)
+                        } else {
+                            next
+                        }
+                        scope.launch { swipe.snapTo(target) }
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -235,34 +306,56 @@ fun PlayerScreen(
                         dragZoneBottom = it.positionInWindow().y + it.size.height - dragOffset
                     }
                     .graphicsLayer {
-                    translationX = swipeOffset
-                    alpha = 1f - (kotlin.math.abs(swipeOffset) / visualWidth).coerceIn(0f, 0.6f)
-                },
+                        translationX = swipe.value
+                        val f = (abs(swipe.value) / visualWidth).coerceIn(0f, 1f)
+                        alpha = 1f - f * 0.6f
+                        // A slight tilt back as it moves away, like a card.
+                        scaleX = 1f - f * 0.08f
+                        scaleY = 1f - f * 0.08f
+                    },
                 label = "visual",
             ) { coverShown ->
                 if (coverShown) {
-                    CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
+                    CoverArt(shownCover, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
                 } else {
                     Oscilloscope(palette, Modifier.fillMaxWidth().aspectRatio(1f))
                 }
             }
         }
 
-        Text(
-            track.title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = TextColors.title,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            track.artist ?: stringResource(R.string.unknown_artist),
-            style = MaterialTheme.typography.titleMedium,
-            color = TextColors.artist,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // The title and artist slide the same way as the picture.
+        AnimatedContent(
+            track,
+            contentKey = { it.id },
+            transitionSpec = {
+                val d = lastDirection
+                if (d == 0) {
+                    fadeIn(tween(250)) togetherWith fadeOut(tween(200))
+                } else {
+                    (slideInHorizontally(tween(320)) { -d * it / 3 } + fadeIn(tween(320))) togetherWith
+                        (slideOutHorizontally(tween(200)) { d * it / 3 } + fadeOut(tween(160)))
+                }
+            },
+            label = "title",
+        ) { shown ->
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    shown.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = TextColors.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    shown.artist ?: stringResource(R.string.unknown_artist),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextColors.artist,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
 
         SeekBar(playback, palette, positionMs, onSeek)
 
@@ -281,7 +374,13 @@ fun PlayerScreen(
                     Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = palette.primary)
                 }
             }
-            IconButton(onClick = onPrevious, Modifier.size(56.dp).pulse(bass, 1.5f)) {
+            IconButton(
+                onClick = {
+                    // In its first seconds, the previous track; later, back to the start.
+                    if (playback.hasPrevious && positionMs() < 3_000) skip(1) else onPrevious()
+                },
+                Modifier.size(56.dp).pulse(bass, 1.5f),
+            ) {
                 Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous), Modifier.size(36.dp))
             }
             FilledIconButton(
@@ -292,7 +391,7 @@ fun PlayerScreen(
                 if (playback.isPlaying) Icon(Icons.Default.Pause, stringResource(R.string.pause), Modifier.size(40.dp))
                 else Icon(Icons.Default.PlayArrow, stringResource(R.string.play), Modifier.size(40.dp))
             }
-            IconButton(onClick = onNext, Modifier.size(56.dp).pulse(bass, 1.5f)) {
+            IconButton(onClick = { if (playback.hasNext) skip(-1) }, Modifier.size(56.dp).pulse(bass, 1.5f), enabled = playback.hasNext) {
                 Icon(Icons.Default.SkipNext, stringResource(R.string.next), Modifier.size(36.dp))
             }
             IconButton(onClick = onStop, Modifier.pulse(bass, 0.5f)) {

@@ -46,14 +46,14 @@ class PlayerGesturesTest {
     private var previous = 0
     private var listClicks = 0
 
-    private fun show() {
+    private fun show(hasPrevious: Boolean = true, hasNext: Boolean = true) {
         // The seek bar animates forever, so the clock is driven by hand.
         rule.mainClock.autoAdvance = false
         rule.setContent {
             ThighHighTheme {
                 PlayerScreen(
                     track = Track(1, "Titre", "Artiste", null, null, null, null),
-                    playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000),
+                    playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000, hasPrevious = hasPrevious, hasNext = hasNext),
                     cover = Cover(null, CoverPalette.Default),
                     positionMs = { 0L },
                     onMinimize = { minimized++ },
@@ -86,7 +86,7 @@ class PlayerGesturesTest {
                     AnimatedVisibility(visible = open, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
                         PlayerScreen(
                             track = Track(1, "Titre $tick", "Artiste", null, null, null, null),
-                            playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000),
+                            playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000, hasPrevious = true, hasNext = true),
                             cover = Cover(null, CoverPalette.Default),
                             positionMs = { tick * 100L },
                             onMinimize = { minimized++; open = false },
@@ -195,5 +195,26 @@ class PlayerGesturesTest {
         rule.onRoot().performTouchInput { swipeRight(startX = width * 0.1f, endX = width * 0.9f, durationMillis = 300) }
         rule.mainClock.advanceTimeBy(2_000)
         assertEquals(1, previous)
+    }
+
+    @Test fun swipeRightOnFirstTrackDoesNothing() {
+        show(hasPrevious = false)
+        rule.onRoot().performTouchInput { swipeRight(startX = width * 0.1f, endX = width * 0.9f, durationMillis = 300) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(0, previous)
+    }
+
+    @Test fun swipeLeftOnLastTrackDoesNothing() {
+        show(hasNext = false)
+        rule.onRoot().performTouchInput { swipeLeft(startX = width * 0.9f, endX = width * 0.1f, durationMillis = 300) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(0, next)
+    }
+
+    @Test fun quickFlickLeftPlaysNext() {
+        show()
+        rule.onRoot().performTouchInput { swipeLeft(startX = width * 0.6f, endX = width * 0.45f, durationMillis = 60) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(1, next)
     }
 }

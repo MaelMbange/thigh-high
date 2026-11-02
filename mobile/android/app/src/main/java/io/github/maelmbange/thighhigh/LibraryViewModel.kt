@@ -60,13 +60,16 @@ data class PlaybackState(
     val repeat: Repeat = Repeat.Off,
     /** Next/previous follow a random order of the queue. */
     val shuffle: Boolean = false,
+    /** Whether there is a track before / after this one (loop included). */
+    val hasPrevious: Boolean = false,
+    val hasNext: Boolean = false,
 )
 
 /** A track waiting in the queue, at [index] in the player's list. */
 data class QueueEntry(val index: Int, val id: Long?, val title: String, val artist: String?)
 
 /** The current track's cover and the colors taken from it. */
-data class Cover(val bitmap: Bitmap?, val palette: CoverPalette)
+data class Cover(val bitmap: Bitmap?, val palette: CoverPalette, val trackId: Long? = null)
 
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _tracks = MutableStateFlow<List<Track>?>(null)
@@ -361,6 +364,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Back to the start of the track, or the previous one in its first seconds. */
     fun previous() = controller?.seekToPrevious()
 
+    /** Always the previous track (a swipe), never the start of this one. */
+    fun skipPrevious() = controller?.seekToPreviousMediaItem()
+
     fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
     fun cycleRepeat() {
@@ -379,6 +385,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             durationMs = player.duration.coerceAtLeast(0L),
             repeat = Repeat.of(player.repeatMode),
             shuffle = player.shuffleModeEnabled,
+            hasPrevious = player.hasPreviousMediaItem(),
+            hasNext = player.hasNextMediaItem(),
         )
     }
 
@@ -412,7 +420,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
                     null // no embedded cover
                 }
             }
-            Cover(bitmap, bitmap?.let(CoverPalette::from) ?: CoverPalette.Default)
+            Cover(bitmap, bitmap?.let(CoverPalette::from) ?: CoverPalette.Default, id)
         }
         _cover.value = cover
     }
