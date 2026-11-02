@@ -193,10 +193,14 @@ private val ListColors = TextColors
 @Composable
 private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: () -> Unit) {
     val playing = current
+    // Like the terminal app, the current track's whole row is filled with the
+    // cover's main color, its text in black or white to stay readable.
+    val highlight = MaterialTheme.colorScheme.primary
+    val onHighlight = MaterialTheme.colorScheme.onPrimary
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = if (playing) {
-            { PlayingBars(animate, ListColors.playing) }
+            { PlayingBars(animate, onHighlight) }
         } else {
             null
         },
@@ -215,7 +219,7 @@ private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: 
                     append(artist)
                     if (track.genre != null) {
                         append(" · ")
-                        withStyle(SpanStyle(color = ListColors.genre)) { append(track.genre) }
+                        withStyle(SpanStyle(color = if (playing) onHighlight else ListColors.genre)) { append(track.genre) }
                     }
                 },
                 maxLines = 1,
@@ -224,9 +228,10 @@ private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: 
         },
         trailingContent = { track.duration?.let { Text(formatDuration(it)) } },
         colors = ListItemDefaults.colors(
-            headlineColor = if (playing) ListColors.playing else ListColors.title,
-            supportingColor = ListColors.artist,
-            trailingIconColor = ListColors.info,
+            containerColor = if (playing) highlight else MaterialTheme.colorScheme.surface,
+            headlineColor = if (playing) onHighlight else ListColors.title,
+            supportingColor = if (playing) onHighlight.copy(alpha = 0.85f) else ListColors.artist,
+            trailingIconColor = if (playing) onHighlight else ListColors.info,
         ),
     )
 }
@@ -413,7 +418,7 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
                 .width(with(LocalDensity.current) { (-offset).toDp() })
-                .background(Catppuccin.Red)
+                .background(DeleteRed)
                 .clickable {
                     scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
                     onDelete()
@@ -424,11 +429,11 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
             // enough to hold them, so neither gets cut while the row slides.
             val revealed = with(LocalDensity.current) { (-offset).toDp() }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (revealed >= 40.dp) Icon(Icons.Default.Delete, null, tint = Catppuccin.Crust)
+                if (revealed >= 40.dp) Icon(Icons.Default.Delete, null, tint = Color.White)
                 if (revealed >= actionWidth - 8.dp) {
                     Text(
                         stringResource(R.string.delete),
-                        color = Catppuccin.Crust,
+                        color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,
                     )

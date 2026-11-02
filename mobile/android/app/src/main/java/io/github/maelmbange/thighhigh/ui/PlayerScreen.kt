@@ -258,8 +258,8 @@ fun PlayerScreen(
             IconButton(onClick = onCycleRepeat, Modifier.pulse(bass, 0.5f)) {
                 when (playback.repeat) {
                     Repeat.Off -> Icon(Icons.Default.Repeat, stringResource(R.string.repeat_off))
-                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = Catppuccin.Green)
-                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = Catppuccin.Green)
+                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = palette.primary)
+                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = palette.primary)
                 }
             }
             IconButton(onClick = onPrevious, Modifier.size(56.dp).pulse(bass, 1.5f)) {

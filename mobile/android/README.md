@@ -5,8 +5,8 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
 ## What it does today
 
 - Lists the tracks in the phone's `Music/thigh-high` folder (the same folder
-  name as the terminal app), newest first. The list uses fixed Catppuccin Mocha
-  colors: Lavender titles, Sky artists, Peach genres, Mauve for the playing track.
+  name as the terminal app), newest first. As in the terminal app, the playing track's
+  whole row is filled with the cover's main color.
 - A bottom bar switches between the library and the download screen.
 - Tapping a track plays it, queues the rest of the list and opens the
   full-screen player: the cover art (top-right button switches to an
@@ -25,10 +25,10 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
   reached through the JNI bridge in `crates/android`; tracks are decoded with
   Android's own codecs. Files put in the folder by another app can't be
   edited by thigh-high, so their genre stays unknown.
-- The full player's background, oscilloscope, seek bar and play button take the cover
-  art's colors, with the same algorithm as the terminal app (`crates/core/src/cover.rs`,
-  ported in `ui/CoverPalette.kt`). Text keeps the same Catppuccin color on every screen
-  (`ui/Theme.kt`), and the loop button lights up in Green.
+- The whole interface takes the playing track's cover colors, with the same algorithm
+  as the terminal app (`crates/core/src/cover.rs`, ported in `ui/CoverPalette.kt`): the
+  main color for accents and the highlighted track, the second for artists, the third
+  for genres and the play button (`ui/Theme.kt`). They fade over when the track changes.
 - Playback runs in a media service, so it keeps going in the background with
   the system's media notification and lock-screen controls.
 - The download screen takes a link (pasted, or shared from the YouTube app

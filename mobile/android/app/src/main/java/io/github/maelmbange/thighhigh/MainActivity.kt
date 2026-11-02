@@ -70,7 +70,9 @@ class MainActivity : ComponentActivity() {
         hideNavigationBar()
         if (savedInstanceState == null) handleShare(intent)
         setContent {
-            ThighHighTheme {
+            // The whole interface follows the cover of the track that plays.
+            val cover by viewModel.cover.collectAsStateWithLifecycle()
+            ThighHighTheme(cover.palette) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     App(viewModel)
                 }
