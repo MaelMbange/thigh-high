@@ -9,6 +9,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -106,14 +110,22 @@ fun PlayerScreen(
     // step would cancel the next and the screen would barely follow.
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var screenHeight by remember { mutableFloatStateOf(1f) }
+    // Only a drag that starts on the cover or above it moves the screen; below
+    // it (title, seek bar, buttons) nothing happens. Both in window pixels.
+    var screenTop by remember { mutableFloatStateOf(0f) }
+    var dragZoneBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    var dragAllowed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Horizontal swipe on the cover / oscilloscope: next or previous track.
     var swipeOffset by remember { mutableFloatStateOf(0f) }
     var visualWidth by remember { mutableFloatStateOf(1f) }
     val pullDown = Modifier.draggable(
         orientation = Orientation.Vertical,
-        state = rememberDraggableState { delta -> dragOffset = (dragOffset + delta).coerceAtLeast(0f) },
+        state = rememberDraggableState { delta ->
+            if (dragAllowed) dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+        },
         onDragStopped = { velocity ->
+            if (!dragAllowed) return@draggable
             val dismiss = when {
                 velocity > 800f -> true
                 velocity < -300f -> false
@@ -130,6 +142,17 @@ fun PlayerScreen(
         Modifier
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height.toFloat() }
+            .onGloballyPositioned { screenTop = it.positionInWindow().y }
+            // Note where each touch starts, before any gesture sees it.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val down = event.changes.firstOrNull { it.changedToDown() } ?: continue
+                        dragAllowed = screenTop + down.position.y <= dragZoneBottom
+                    }
+                }
+            }
             // The drag covers the whole screen, which also keeps taps from
             // reaching the library and tabs drawn underneath. Nothing here may
             // consume touches: gestures still under their touch slop (a slow
@@ -160,6 +183,10 @@ fun PlayerScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .onSizeChanged { visualWidth = it.width.toFloat() }
+                .onGloballyPositioned {
+                    // Measured at rest: remove the pull-down shift, if any.
+                    dragZoneBottom = it.positionInWindow().y + it.size.height - dragOffset
+                }
                 // Swipe left for the next track, right for the previous one.
                 // The picture follows the finger, then slides back into place.
                 .pointerInput(Unit) {

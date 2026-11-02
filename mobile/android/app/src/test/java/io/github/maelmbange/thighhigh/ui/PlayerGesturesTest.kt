@@ -140,6 +140,15 @@ class PlayerGesturesTest {
         assertEquals(0, minimized)
     }
 
+    @Test fun dragStartingBelowCoverDoesNothing() {
+        showInApp()
+        // From the controls at the bottom, a quick flick down.
+        rule.onRoot().performTouchInput { swipeDown(startY = height * 0.85f, endY = height * 0.99f, durationMillis = 80) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(0, minimized)
+        assertEquals(0, listClicks)
+    }
+
     @Test fun swipeDownFromTopMinimizes() {
         show()
         rule.onRoot().performTouchInput { swipeDown(startY = height * 0.1f, endY = height * 0.7f, durationMillis = 300) }
