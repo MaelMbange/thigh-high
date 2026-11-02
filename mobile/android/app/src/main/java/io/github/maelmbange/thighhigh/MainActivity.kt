@@ -15,6 +15,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -170,6 +173,14 @@ class MainActivity : ComponentActivity() {
         }
 
         val tab by viewModel.tab.collectAsStateWithLifecycle()
+        val pagerState = rememberPagerState(initialPage = tab.ordinal) { Tab.entries.size }
+        // The bar picks a tab: slide to it. A swipe lands on one: the bar follows.
+        LaunchedEffect(tab) {
+            if (pagerState.targetPage != tab.ordinal) pagerState.animateScrollToPage(tab.ordinal)
+        }
+        LaunchedEffect(pagerState) {
+            snapshotFlow { pagerState.settledPage }.collect { viewModel.tab.value = Tab.entries[it] }
+        }
         val tracks by viewModel.tracks.collectAsStateWithLifecycle()
         val visibleTracks by viewModel.visibleTracks.collectAsStateWithLifecycle()
         val filter by viewModel.filter.collectAsStateWithLifecycle()
@@ -281,17 +292,14 @@ class MainActivity : ComponentActivity() {
                 }
             },
         ) { padding ->
-            // Tabs slide toward the side of the tab picked.
-            AnimatedContent(
-                tab,
+            // The tabs sit side by side: a swipe left or right moves to the
+            // next one, and tapping a tab in the bar slides there too.
+            HorizontalPager(
+                pagerState,
                 Modifier.padding(padding),
-                transitionSpec = {
-                    val d = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                    (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { d * it / 5 } + fadeIn(tween(250, delayMillis = 50))) togetherWith
-                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -d * it / 5 } + fadeOut(tween(150)))
-                },
-                label = "tab",
-            ) { tab ->
+                key = { Tab.entries[it] },
+            ) { page ->
+              val tab = Tab.entries[page]
               Box(Modifier.fillMaxSize()) {
                 when (tab) {
                     Tab.Library -> if (granted) {
@@ -320,7 +328,9 @@ class MainActivity : ComponentActivity() {
                         PermissionScreen(onGrant = { launcher.launch(REQUESTED_PERMISSIONS) })
                     }
                     Tab.Playlists -> {
-                        BackHandler(enabled = openPlaylistId != null) { viewModel.openPlaylistId.value = null }
+                        BackHandler(enabled = openPlaylistId != null && pagerState.currentPage == Tab.Playlists.ordinal) {
+                            viewModel.openPlaylistId.value = null
+                        }
                         PlaylistsScreen(
                             playlists = playlists,
                             library = tracks.orEmpty(),

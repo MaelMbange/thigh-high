@@ -55,6 +55,13 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.combinedClickable
@@ -597,18 +604,37 @@ fun SwipeToReveal(
         Box(
             Modifier
                 .offset { IntOffset(offset.roundToInt(), 0) }
-                .draggable(
-                    orientation = Orientation.Horizontal,
-                    state = rememberDraggableState { delta -> offset = (offset + delta).coerceIn(openOffset, 0f) },
-                    onDragStopped = { velocity ->
+                // Only a drag that opens the row (to the left), or moves one
+                // already open, is taken here; any other is left to the tabs,
+                // which slide on a horizontal swipe.
+                .pointerInput(openOffset) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val velocity = VelocityTracker()
+                        velocity.addPosition(down.uptimeMillis, down.position)
+                        var taken = false
+                        val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                            if (over < 0f || offset < 0f) {
+                                taken = true
+                                change.consume()
+                                offset = (offset + over).coerceIn(openOffset, 0f)
+                            }
+                        }
+                        if (drag == null || !taken) return@awaitEachGesture
+                        horizontalDrag(drag.id) { change ->
+                            velocity.addPosition(change.uptimeMillis, change.position)
+                            offset = (offset + change.positionChange().x).coerceIn(openOffset, 0f)
+                            change.consume()
+                        }
+                        val v = velocity.calculateVelocity().x
                         val open = when {
-                            velocity < -600f -> true
-                            velocity > 600f -> false
+                            v < -600f -> true
+                            v > 600f -> false
                             else -> offset < openOffset / 2
                         }
-                        animate(offset, if (open) openOffset else 0f) { v, _ -> offset = v }
-                    },
-                ),
+                        scope.launch { animate(offset, if (open) openOffset else 0f) { value, _ -> offset = value } }
+                    }
+                },
         ) {
             content()
         }
