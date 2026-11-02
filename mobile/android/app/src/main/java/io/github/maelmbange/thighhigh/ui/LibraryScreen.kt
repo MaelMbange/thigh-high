@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -29,8 +30,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.genre.GenreScan
+import io.github.maelmbange.thighhigh.library.CoverColors
 import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
 import kotlin.time.Duration
@@ -114,11 +119,24 @@ private fun BoxScope.LibraryList(
         }
 }
 
+/**
+ * Each track wears its cover's colors: the title in the main color, artist
+ * and genre in the second one. Tracks without a cover keep the theme's colors.
+ */
 @Composable
 private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
-    val accent = MaterialTheme.colorScheme.primary
+    val context = LocalContext.current
+    val palette by produceState(CoverColors.cached(track.id)?.palette, track.id) {
+        value = CoverColors.load(context, track.id)
+    }
+    val defaults = ListItemDefaults.colors()
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
+        leadingContent = if (playing) {
+            { Icon(Icons.Default.GraphicEq, null, tint = palette?.primary ?: MaterialTheme.colorScheme.primary) }
+        } else {
+            null
+        },
         headlineContent = {
             Text(
                 track.title,
@@ -135,11 +153,10 @@ private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
             )
         },
         trailingContent = { track.duration?.let { Text(formatDuration(it)) } },
-        colors = if (playing) {
-            ListItemDefaults.colors(headlineColor = accent, supportingColor = accent)
-        } else {
-            ListItemDefaults.colors()
-        },
+        colors = ListItemDefaults.colors(
+            headlineColor = palette?.primary ?: defaults.headlineColor,
+            supportingColor = palette?.secondary ?: defaults.supportingTextColor,
+        ),
     )
 }
 

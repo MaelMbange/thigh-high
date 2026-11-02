@@ -15,7 +15,7 @@ const val MUSIC_RELATIVE_PATH = "Music/thigh-high/"
 /** What MediaStore writes when a tag is missing. */
 private val PLACEHOLDER_ARTISTS = setOf(MediaStore.UNKNOWN_STRING, "")
 
-/** Lists the tracks in [MUSIC_RELATIVE_PATH], sorted by title like the terminal app. */
+/** Lists the tracks in [MUSIC_RELATIVE_PATH], most recently added first. */
 fun scanLibrary(context: Context): List<Track> {
     val projection = arrayOf(
         MediaStore.Audio.Media._ID,
@@ -34,7 +34,7 @@ fun scanLibrary(context: Context): List<Track> {
         projection,
         selection,
         arrayOf(MUSIC_RELATIVE_PATH),
-        null,
+        "${MediaStore.Audio.Media.DATE_ADDED} DESC, ${MediaStore.Audio.Media.TITLE} COLLATE NOCASE",
     )?.use { c ->
         val id = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val title = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -59,5 +59,5 @@ fun scanLibrary(context: Context): List<Track> {
             )
         }
     }
-    return tracks.sortedBy { it.title.lowercase() }
+    return tracks
 }

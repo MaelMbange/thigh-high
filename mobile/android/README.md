@@ -5,14 +5,15 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
 ## What it does today
 
 - Lists the tracks in the phone's `Music/thigh-high` folder (the same folder
-  name as the terminal app), sorted by title.
+  name as the terminal app), newest first. Each title is drawn in its cover's
+  main color, artist and genre in the second color.
 - A bottom bar switches between the library and the download screen.
 - Tapping a track plays it, queues the rest of the list and opens the
-  full-screen player: an oscilloscope of what you hear (top-right button
-  switches to the cover art), loop (off / list / track), previous, play/pause,
-  next, stop and a seek bar. The top-left button (or Back) shrinks it to a bar
+  full-screen player: the cover art (top-right button switches to an
+  oscilloscope of what you hear), loop (off / list / track), previous, play/pause,
+  next, stop and a seek bar whose played part ripples with the bass. The top-left button (or Back) shrinks it to a bar
   above the tabs without stopping the music; tap the bar to open it again.
-- The filter button narrows the library to one artist, genre or album, and
+- The filter button drops a menu that narrows the library to one artist, genre or album, and
   "Detect missing genres" in the ⋮ menu runs the genre model on every track
   without one (the terminal app's `f` and `g`). New downloads get their genre
   detected automatically. The model is the Rust core's (`crates/core`),

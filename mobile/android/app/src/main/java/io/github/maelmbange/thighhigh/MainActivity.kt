@@ -50,7 +50,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maelmbange.thighhigh.ui.DownloadScreen
-import io.github.maelmbange.thighhigh.ui.FilterSheet
+import io.github.maelmbange.thighhigh.ui.FilterMenu
 import io.github.maelmbange.thighhigh.ui.LibraryScreen
 import io.github.maelmbange.thighhigh.ui.MiniPlayer
 import io.github.maelmbange.thighhigh.ui.PermissionScreen
@@ -137,11 +137,23 @@ class MainActivity : ComponentActivity() {
                     },
                     actions = {
                         if (tab == Tab.Library && granted) {
-                            IconButton(onClick = { filterSheetOpen = true }) {
-                                Icon(Icons.Default.FilterList, stringResource(R.string.filter))
-                            }
                             IconButton(onClick = viewModel::refresh) {
                                 Icon(Icons.Default.Refresh, stringResource(R.string.refresh))
+                            }
+                            Box {
+                                IconButton(onClick = { filterSheetOpen = true }) {
+                                    Icon(Icons.Default.FilterList, stringResource(R.string.filter))
+                                }
+                                FilterMenu(
+                                    expanded = filterSheetOpen,
+                                    tracks = tracks.orEmpty(),
+                                    current = filter,
+                                    onPick = {
+                                        viewModel.filter.value = it
+                                        filterSheetOpen = false
+                                    },
+                                    onDismiss = { filterSheetOpen = false },
+                                )
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }) {
@@ -200,17 +212,7 @@ class MainActivity : ComponentActivity() {
                             onTrackClick = viewModel::play,
                             onClearFilter = { viewModel.filter.value = null },
                         )
-                        if (filterSheetOpen) {
-                            FilterSheet(
-                                tracks = tracks.orEmpty(),
-                                current = filter,
-                                onPick = {
-                                    viewModel.filter.value = it
-                                    filterSheetOpen = false
-                                },
-                                onDismiss = { filterSheetOpen = false },
-                            )
-                        }
+
                     } else {
                         PermissionScreen(onGrant = { launcher.launch(REQUESTED_PERMISSIONS) })
                     }

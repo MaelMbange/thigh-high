@@ -1,6 +1,7 @@
 package io.github.maelmbange.thighhigh.ui
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.RepeatOneOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,13 +45,19 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
@@ -61,6 +70,11 @@ import io.github.maelmbange.thighhigh.PlaybackState
 import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
+import io.github.maelmbange.thighhigh.playback.AudioTap
+import kotlin.math.PI
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 
 @Composable
@@ -78,7 +92,7 @@ fun PlayerScreen(
     onSeek: (Long) -> Unit,
 ) {
     val palette = cover.palette
-    var showCover by rememberSaveable { mutableStateOf(false) }
+    var showCover by rememberSaveable { mutableStateOf(true) }
     val background = MaterialTheme.colorScheme.background
     Column(
         Modifier
@@ -178,6 +192,7 @@ private fun CoverArt(cover: Cover, modifier: Modifier) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: () -> Long, onSeek: (Long) -> Unit) {
     var position by remember { mutableLongStateOf(positionMs()) }
@@ -188,6 +203,20 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
         while (true) {
             position = positionMs()
             delay(250)
+        }
+    }
+    // The played part of the bar ripples with the bass.
+    var bass by remember { mutableFloatStateOf(0f) }
+    var phase by remember { mutableFloatStateOf(0f) }
+    val playing by rememberUpdatedState(playback.isPlaying)
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) withFrameNanos { now ->
+            val dt = if (last == 0L) 0f else (now - last) / 1e9f
+            last = now
+            // Rise at once on a kick, fall back smoothly.
+            bass = max(AudioTap.bass(), bass * 0.88f)
+            if (playing) phase += dt * 6f
         }
     }
     val duration = playback.durationMs
@@ -203,12 +232,46 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
             },
             enabled = duration > 0,
             colors = SliderDefaults.colors(thumbColor = palette.primary, activeTrackColor = palette.primary),
+            track = { state ->
+                val range = state.valueRange.endInclusive - state.valueRange.start
+                WavyTrack(
+                    fraction = if (range > 0) (state.value - state.valueRange.start) / range else 0f,
+                    amplitude = bass,
+                    phase = phase,
+                    active = palette.primary,
+                    inactive = palette.primary.copy(alpha = 0.25f),
+                )
+            },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val shown = if (dragging) (dragValue * duration).toLong() else position
             Text(formatMs(shown), style = MaterialTheme.typography.bodySmall)
             Text(formatMs(duration), style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/** The played part is a sine wave whose height follows [amplitude] (0 to 1); the rest is flat. */
+@Composable
+private fun WavyTrack(fraction: Float, amplitude: Float, phase: Float, active: Color, inactive: Color) {
+    Canvas(Modifier.fillMaxWidth().height(24.dp)) {
+        val mid = size.height / 2
+        val end = size.width * fraction.coerceIn(0f, 1f)
+        val stroke = 4.dp.toPx()
+        drawLine(inactive, Offset(end, mid), Offset(size.width, mid), stroke, StrokeCap.Round)
+        if (end <= 0f) return@Canvas
+        // Slight: at most 5 dp each way, plus a faint ripple even when quiet.
+        val height = (0.6f + amplitude * 4.4f).dp.toPx()
+        val wavelength = 28.dp.toPx()
+        val path = Path().apply {
+            moveTo(0f, mid)
+            var x = 0f
+            while (x < end) {
+                x = min(x + 2f, end)
+                lineTo(x, mid + height * sin(x / wavelength * 2f * PI.toFloat() - phase))
+            }
+        }
+        drawPath(path, active, style = Stroke(stroke, cap = StrokeCap.Round))
     }
 }
 
