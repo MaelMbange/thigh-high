@@ -389,7 +389,7 @@ fun PlayerScreen(
                         val f = (abs(swipe) / page).coerceIn(0f, 1f)
                         alpha = 1f - f * 0.6f
                         // The cover swells gently with the bass, like the play button.
-                        val beat = if (showCover) 1f + PULSE_PER_UNIT * COVER_PULSE * bass.value else 1f
+                        val beat = if (showCover) 1f + PULSE_PER_UNIT * COVER_PULSE * bass.at(COVER_DELAY_MS) else 1f
                         scaleX = (1f - f * 0.08f) * beat
                         scaleY = (1f - f * 0.08f) * beat
                     },
@@ -450,7 +450,7 @@ fun PlayerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onCycleRepeat, Modifier.pulse(bass, 0.5f)) {
+            IconButton(onClick = onCycleRepeat, Modifier.pulse(bass, 0.5f, OUTER_DELAY_MS)) {
                 when (playback.repeat) {
                     Repeat.Off -> Icon(Icons.Default.Repeat, stringResource(R.string.repeat_off))
                     Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = palette.primary)
@@ -462,7 +462,7 @@ fun PlayerScreen(
                     // In its first seconds, the previous track; later, back to the start.
                     if (playback.hasPrevious && positionMs() < 3_000) skip(1) else onPrevious()
                 },
-                Modifier.size(56.dp).pulse(bass, 1.5f),
+                Modifier.size(56.dp).pulse(bass, 1.5f, NEIGHBOR_DELAY_MS),
             ) {
                 Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous), Modifier.size(36.dp))
             }
@@ -474,10 +474,10 @@ fun PlayerScreen(
                 if (playback.isPlaying) Icon(Icons.Default.Pause, stringResource(R.string.pause), Modifier.size(40.dp))
                 else Icon(Icons.Default.PlayArrow, stringResource(R.string.play), Modifier.size(40.dp))
             }
-            IconButton(onClick = { if (playback.hasNext) skip(-1) }, Modifier.size(56.dp).pulse(bass, 1.5f), enabled = playback.hasNext) {
+            IconButton(onClick = { if (playback.hasNext) skip(-1) }, Modifier.size(56.dp).pulse(bass, 1.5f, NEIGHBOR_DELAY_MS), enabled = playback.hasNext) {
                 Icon(Icons.Default.SkipNext, stringResource(R.string.next), Modifier.size(36.dp))
             }
-            IconButton(onClick = onToggleShuffle, Modifier.pulse(bass, 0.5f)) {
+            IconButton(onClick = onToggleShuffle, Modifier.pulse(bass, 0.5f, OUTER_DELAY_MS)) {
                 if (playback.shuffle) Icon(Icons.Default.ShuffleOn, stringResource(R.string.shuffle_on), tint = palette.primary)
                 else Icon(Icons.Default.Shuffle, stringResource(R.string.shuffle_off))
             }
@@ -706,13 +706,60 @@ private const val PULSE_PER_UNIT = 0.04f
 /** The cover's pulse weight: big as it is, it only breathes (about 2.5 %). */
 private const val COVER_PULSE = 0.6f
 
+/*
+ * Like a stone dropped in water: the play button takes the beat first, and it
+ * spreads from there, a little later and a little softer the further out.
+ */
+private const val NEIGHBOR_DELAY_MS = 70L
+private const val COVER_DELAY_MS = 110L
+private const val OUTER_DELAY_MS = 140L
+
+/**
+ * The recent bass levels, so a control can follow the beat as it was a few
+ * milliseconds ago. Reading [at] in a draw layer redraws it every frame.
+ */
+internal class BassTrail {
+    private val frame = androidx.compose.runtime.mutableLongStateOf(0L)
+    // About half a second of frames, even at 120 Hz.
+    private val times = LongArray(64)
+    private val values = FloatArray(64)
+    private var count = 0
+    private var head = -1
+
+    fun push(timeNs: Long, value: Float) {
+        head = (head + 1) % times.size
+        times[head] = timeNs
+        values[head] = value
+        if (count < times.size) count++
+        frame.longValue = timeNs
+    }
+
+    /** The level [delayMs] ago, interpolated between frames. */
+    fun at(delayMs: Long): Float {
+        val now = frame.longValue
+        if (count == 0) return 0f
+        val target = now - delayMs * 1_000_000L
+        var i = head
+        repeat(count - 1) {
+            val prev = (i - 1 + times.size) % times.size
+            if (times[prev] <= target) {
+                val span = (times[i] - times[prev]).coerceAtLeast(1L)
+                val t = ((target - times[prev]).toFloat() / span).coerceIn(0f, 1f)
+                return values[prev] + (values[i] - values[prev]) * t
+            }
+            i = prev
+        }
+        return values[i]
+    }
+}
+
 /**
  * Grows the control with the bass: [weight] 3 for play, 1.5 for its
  * neighbours, 0.5 for the outer buttons. Read in the draw layer, so the beat
  * never recomposes the screen.
  */
-private fun Modifier.pulse(bass: androidx.compose.runtime.State<Float>, weight: Float) = graphicsLayer {
-    val scale = 1f + PULSE_PER_UNIT * weight * bass.value
+private fun Modifier.pulse(bass: BassTrail, weight: Float, delayMs: Long = 0L) = graphicsLayer {
+    val scale = 1f + PULSE_PER_UNIT * weight * bass.at(delayMs)
     scaleX = scale
     scaleY = scale
 }
@@ -723,8 +770,8 @@ private fun Modifier.pulse(bass: androidx.compose.runtime.State<Float>, weight: 
  * both move, rising at once and falling back smoothly.
  */
 @Composable
-private fun rememberBassLevel(): androidx.compose.runtime.State<Float> {
-    val level = remember { mutableFloatStateOf(0f) }
+private fun rememberBassLevel(): BassTrail {
+    val level = remember { BassTrail() }
     LaunchedEffect(Unit) {
         val window = FloatArray(1024)
         var peak = 0.05f
@@ -743,7 +790,7 @@ private fun rememberBassLevel(): androidx.compose.runtime.State<Float> {
             peak = max(rms, peak * 0.995f).coerceAtLeast(0.02f)
             val target = (rms / peak).coerceIn(0f, 1f).let { it * it }
             smoothed = if (target > smoothed) target else smoothed * 0.85f + target * 0.15f
-            level.floatValue = smoothed
+            level.push(System.nanoTime(), smoothed)
         }
     }
     return level
