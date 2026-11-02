@@ -95,6 +95,9 @@ sealed interface LyricsState {
     data object Offline : LyricsState
 }
 
+/** How long the queue shown stays as expected after a removal, before the player's state is read again. */
+private const val QUEUE_SETTLE_MS = 700L
+
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _tracks = MutableStateFlow<List<Track>?>(null)
     /** `null` until the first scan finishes. */
@@ -343,13 +346,24 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         val expected = _upNext.value.filterNot { it.index == index }
             .map { if (it.index > index) it.copy(index = it.index - 1) else it }
         _upNext.value = expected
-        pendingQueue = expected.map { it.id } to System.currentTimeMillis()
+        // The queue shown is frozen while the change settles: the service can
+        // pass through a state where the order is briefly another one, which
+        // drew the list wrong for a frame.
+        queueFrozen?.cancel()
+        queueFrozen = viewModelScope.launch {
+            delay(QUEUE_SETTLE_MS)
+            queueFrozen = null
+            controller?.let {
+                _upNext.value = upNextOf(it)
+                _history.value = historyOf(it)
+            }
+        }
         c.removeMediaItem(index)
         queueSource = null
     }
 
-    /** The queue a removal should lead to, and when it was asked: see [removeQueued]. */
-    private var pendingQueue: Pair<List<Long?>, Long>? = null
+    /** Set while the queue shown waits for a removal to settle: see [removeQueued]. */
+    private var queueFrozen: kotlinx.coroutines.Job? = null
 
     fun createPlaylist(name: String, with: Track? = null): Playlist =
         playlistStore.create(name, listOfNotNull(with?.id))
@@ -498,15 +512,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun positionMs(): Long = controller?.currentPosition ?: 0L
 
     private fun syncState(player: Player) {
-        val upNext = upNextOf(player)
-        val pending = pendingQueue
-        if (pending != null) {
-            val settled = upNext.map { it.id } == pending.first ||
-                System.currentTimeMillis() - pending.second > 1_000
-            if (settled) pendingQueue = null
+        if (queueFrozen == null) {
+            _upNext.value = upNextOf(player)
+            _history.value = historyOf(player)
         }
-        if (pendingQueue == null) _upNext.value = upNext
-        _history.value = historyOf(player)
         val prevId = player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
             ?.let { player.getMediaItemAt(it).mediaId.toLongOrNull() }
         val nextId = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }
