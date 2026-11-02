@@ -23,8 +23,8 @@ import kotlin.math.roundToInt
  * 2 × 4 dots each), from the secondary color near silence to the tertiary at
  * its peaks. Quiet tracks are scaled up to stay visible.
  */
-/** Samples on screen (~11 ms at 44.1 kHz). */
-private const val SHOWN = 512
+/** Samples on screen (~8 ms at 44.1 kHz): few enough that each wave is wide. */
+private const val SHOWN = 352
 
 /** Points averaged on each side of a sample. */
 private const val SMOOTH = 3
@@ -40,7 +40,7 @@ fun Oscilloscope(palette: CoverPalette, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         @Suppress("UNUSED_EXPRESSION") frame // redraw on every frame
         AudioTap.waveform(raw)
-        // Calmer than the raw signal: the most recent half of the window
+        // Calmer than the raw signal: the most recent third of the window
         // (wider waves on screen), each point averaged with its neighbours
         // to drop the high-pitched jitter that filled the screen with spikes.
         val offset = raw.size - SHOWN
