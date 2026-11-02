@@ -6,6 +6,7 @@ activityCompose = "1.10.1"
 lifecycle = "2.9.1"
 media3 = "1.6.1"
 coreKtx = "1.16.0"
+youtubedl = "0.18.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -20,6 +21,8 @@ androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+youtubedl-library = { module = "io.github.junkfood02.youtubedl-android:library", version.ref = "youtubedl" }
+youtubedl-ffmpeg = { module = "io.github.junkfood02.youtubedl-android:ffmpeg", version.ref = "youtubedl" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

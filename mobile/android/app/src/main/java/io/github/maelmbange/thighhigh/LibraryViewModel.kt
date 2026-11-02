@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class Tab { Library, Download }
+
 data class PlaybackState(
     val currentId: Long? = null,
     val isPlaying: Boolean = false,
@@ -34,6 +36,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _playback = MutableStateFlow(PlaybackState())
     val playback: StateFlow<PlaybackState> = _playback.asStateFlow()
 
+    /** The screen picked in the bottom bar; kept here so it survives rotation. */
+    val tab = MutableStateFlow(Tab.Library)
+
+    val downloader = getApplication<ThighHighApp>().downloader
+
     private var controller: MediaController? = null
     private val controllerFuture: ListenableFuture<MediaController> =
         MediaController.Builder(
@@ -46,6 +53,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // A finished download shows up in the list right away.
+        viewModelScope.launch { downloader.added.collect { refresh() } }
         controllerFuture.addListener({
             val c = controllerFuture.get()
             controller = c
