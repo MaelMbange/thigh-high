@@ -13,6 +13,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -183,10 +184,6 @@ fun PlayerScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .onSizeChanged { visualWidth = it.width.toFloat() }
-                .onGloballyPositioned {
-                    // Measured at rest: remove the pull-down shift, if any.
-                    dragZoneBottom = it.positionInWindow().y + it.size.height - dragOffset
-                }
                 // Swipe left for the next track, right for the previous one.
                 // The picture follows the finger, then slides back into place.
                 .pointerInput(Unit) {
@@ -211,14 +208,21 @@ fun PlayerScreen(
         ) {
             Crossfade(
                 showCover,
-                Modifier.graphicsLayer {
+                Modifier
+                    // The pull-down zone ends at the bottom of the cover itself,
+                    // not of the space around it. Measured at rest: the pull-down
+                    // shift, if any, is taken out.
+                    .onGloballyPositioned {
+                        dragZoneBottom = it.positionInWindow().y + it.size.height - dragOffset
+                    }
+                    .graphicsLayer {
                     translationX = swipeOffset
                     alpha = 1f - (kotlin.math.abs(swipeOffset) / visualWidth).coerceIn(0f, 0.6f)
                 },
                 label = "visual",
             ) { coverShown ->
                 if (coverShown) {
-                    CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f))
+                    CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
                 } else {
                     Oscilloscope(palette, Modifier.fillMaxWidth().aspectRatio(1f))
                 }

@@ -2,6 +2,7 @@ package io.github.maelmbange.thighhigh.ui
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -147,6 +148,22 @@ class PlayerGesturesTest {
         rule.mainClock.advanceTimeBy(2_000)
         assertEquals(0, minimized)
         assertEquals(0, listClicks)
+    }
+
+    @Test fun dragStartingJustBelowCoverDoesNothing() {
+        showInApp()
+        val coverBottom = rule.onNodeWithTag("cover").fetchSemanticsNode().boundsInRoot.bottom
+        rule.onRoot().performTouchInput { swipeDown(startY = coverBottom + 20f, endY = height * 0.99f, durationMillis = 80) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(0, minimized)
+    }
+
+    @Test fun dragStartingJustInsideCoverMinimizes() {
+        showInApp()
+        val coverBottom = rule.onNodeWithTag("cover").fetchSemanticsNode().boundsInRoot.bottom
+        rule.onRoot().performTouchInput { swipeDown(startY = coverBottom - 20f, endY = height * 0.99f, durationMillis = 80) }
+        rule.mainClock.advanceTimeBy(2_000)
+        assertEquals(1, minimized)
     }
 
     @Test fun swipeDownFromTopMinimizes() {
