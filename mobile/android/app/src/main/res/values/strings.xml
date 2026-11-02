@@ -16,7 +16,8 @@
     <string name="tab_download">Télécharger</string>
 
     <string name="download">Télécharger</string>
-    <string name="download_url">Lien (YouTube, SoundCloud…)</string>
+    <string name="download_url">Liens (YouTube, SoundCloud…), un par ligne</string>
+    <string name="download_many">Télécharger les %1$d</string>
     <string name="paste">Coller</string>
     <string name="download_hint">Colle un lien, ou partage une vidéo vers thigh-high depuis l\'app YouTube. Le son est enregistré dans Music/thigh-high avec sa pochette.</string>
     <string name="download_waiting">Préparation de yt-dlp…</string>
@@ -95,6 +96,10 @@
     <string name="ytdlp_never">Jamais vérifié</string>
     <string name="ytdlp_update">Mettre à jour</string>
 
+    <plurals name="download_links">
+        <item quantity="one">%1$d lien</item>
+        <item quantity="other">%1$d liens</item>
+    </plurals>
     <plurals name="track_count">
         <item quantity="one">%1$d morceau</item>
         <item quantity="other">%1$d morceaux</item>

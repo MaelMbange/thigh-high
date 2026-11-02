@@ -40,6 +40,9 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.download.DownloadJob
 import io.github.maelmbange.thighhigh.download.DownloadStatus
 import io.github.maelmbange.thighhigh.download.UpdateResult
+import io.github.maelmbange.thighhigh.download.parseLinks
+import androidx.compose.runtime.remember
+import androidx.compose.ui.res.pluralStringResource
 import io.github.maelmbange.thighhigh.download.YtDlpState
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.size
@@ -61,9 +64,11 @@ fun DownloadScreen(
     var url by rememberSaveable { mutableStateOf("") }
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
+    // Several links can be pasted at once, one per line: each one is downloaded.
+    val links = remember(url) { parseLinks(url) }
     val submit = {
-        if (url.isNotBlank()) {
-            onDownload(url)
+        if (links.isNotEmpty()) {
+            links.forEach(onDownload)
             url = ""
         }
     }
@@ -73,22 +78,34 @@ fun DownloadScreen(
             onValueChange = { url = it },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             label = { Text(stringResource(R.string.download_url)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { submit() }),
+            supportingText = if (links.size > 1) {
+                { Text(pluralStringResource(R.plurals.download_links, links.size, links.size)) }
+            } else {
+                null
+            },
+            maxLines = 6,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             trailingIcon = {
-                IconButton(onClick = { clipboard.getText()?.text?.let { url = it.trim() } }) {
+                IconButton(onClick = {
+                    // Pasting adds to what is already there, on a new line.
+                    clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { pasted ->
+                        url = if (url.isBlank()) pasted else url.trimEnd() + "\n" + pasted
+                    }
+                }) {
                     Icon(Icons.Default.ContentPaste, stringResource(R.string.paste))
                 }
             },
         )
         Button(
             onClick = submit,
-            enabled = url.isNotBlank(),
+            enabled = links.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         ) {
             Icon(Icons.Default.Download, null)
-            Text(stringResource(R.string.download), Modifier.padding(start = 8.dp))
+            Text(
+                if (links.size > 1) stringResource(R.string.download_many, links.size) else stringResource(R.string.download),
+                Modifier.padding(start = 8.dp),
+            )
         }
         YtDlpRow(ytdlp, onUpdateYtDlp)
         if (jobs.isEmpty()) {

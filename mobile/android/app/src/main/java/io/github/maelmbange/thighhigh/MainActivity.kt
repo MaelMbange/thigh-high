@@ -72,6 +72,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maelmbange.thighhigh.ui.DownloadScreen
+import io.github.maelmbange.thighhigh.download.parseLinks
 import io.github.maelmbange.thighhigh.ui.PlaylistsScreen
 import io.github.maelmbange.thighhigh.ui.TrackActionsSheet
 import io.github.maelmbange.thighhigh.library.Playlist
@@ -138,8 +139,9 @@ class MainActivity : ComponentActivity() {
         }
         if (intent?.action != Intent.ACTION_SEND) return
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
-        val url = URL_PATTERN.find(text)?.value ?: return
-        viewModel.downloader.start(url)
+        val links = parseLinks(text).filter { it.startsWith("http") }
+        if (links.isEmpty()) return
+        links.forEach(viewModel.downloader::start)
         viewModel.tab.value = Tab.Download
     }
 
@@ -424,7 +426,6 @@ class MainActivity : ComponentActivity() {
         /** Sent by the media notification and the lock screen. */
         const val ACTION_OPEN_PLAYER = "io.github.maelmbange.thighhigh.OPEN_PLAYER"
 
-        private val URL_PATTERN = Regex("""https?://\S+""")
 
         private val AUDIO_PERMISSION =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
