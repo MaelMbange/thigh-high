@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -122,6 +121,7 @@ class MainActivity : ComponentActivity() {
         val jobs by viewModel.downloader.jobs.collectAsStateWithLifecycle()
         val cover by viewModel.cover.collectAsStateWithLifecycle()
         val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
+        val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
         val current = tracks?.firstOrNull { it.id == playback.currentId }
 
         Scaffold(
@@ -137,9 +137,6 @@ class MainActivity : ComponentActivity() {
                     },
                     actions = {
                         if (tab == Tab.Library && granted) {
-                            IconButton(onClick = viewModel::refresh) {
-                                Icon(Icons.Default.Refresh, stringResource(R.string.refresh))
-                            }
                             Box {
                                 IconButton(onClick = { filterSheetOpen = true }) {
                                     Icon(Icons.Default.FilterList, stringResource(R.string.filter))
@@ -180,6 +177,9 @@ class MainActivity : ComponentActivity() {
                         MiniPlayer(
                             current,
                             playback.isPlaying,
+                            palette = cover.palette,
+                            durationMs = playback.durationMs,
+                            positionMs = viewModel::positionMs,
                             onOpen = { viewModel.playerOpen.value = true },
                             onTogglePlay = viewModel::togglePlayPause,
                         )
@@ -210,6 +210,8 @@ class MainActivity : ComponentActivity() {
                             isPlaying = playback.isPlaying,
                             filter = filter,
                             genreScan = genreScan,
+                            refreshing = refreshing,
+                            onRefresh = viewModel::pullRefresh,
                             onTrackClick = viewModel::play,
                             onClearFilter = { viewModel.filter.value = null },
                         )

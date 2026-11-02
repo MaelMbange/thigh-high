@@ -35,8 +35,8 @@ The APK only contains 64-bit ARM libraries (Python and ffmpeg for yt-dlp
 weigh about 50 MB per CPU type), which covers every recent phone.
 
 You can also copy audio files into `Music/thigh-high` on the phone (over USB, for
-example). The list refreshes when the app comes back to the foreground, or with
-the refresh button.
+example). The list refreshes when the app comes back to the foreground, or
+by pulling the list down.
 
 ## Build
 

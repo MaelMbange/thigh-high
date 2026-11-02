@@ -10,6 +10,20 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import kotlin.math.PI
 import kotlin.math.sin
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,9 +42,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -58,6 +70,7 @@ import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
 import kotlin.time.Duration
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     tracks: List<Track>?,
@@ -65,6 +78,8 @@ fun LibraryScreen(
     isPlaying: Boolean,
     filter: Filter?,
     genreScan: GenreScan?,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
     onTrackClick: (Track) -> Unit,
     onClearFilter: () -> Unit,
 ) {
@@ -79,7 +94,10 @@ fun LibraryScreen(
             )
         }
         if (genreScan != null) GenreScanBanner(genreScan)
-        Box(Modifier.fillMaxSize()) { LibraryList(tracks, currentId, isPlaying, onTrackClick) }
+        // Pull the list down to rescan the music folder.
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            LibraryList(tracks, currentId, isPlaying, onTrackClick)
+        }
     }
 }
 
@@ -182,10 +200,23 @@ private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: 
 }
 
 @Composable
-fun MiniPlayer(track: Track, isPlaying: Boolean, onOpen: () -> Unit, onTogglePlay: () -> Unit) {
-    Surface(onClick = onOpen, color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column {
-            HorizontalDivider()
+fun MiniPlayer(
+    track: Track,
+    isPlaying: Boolean,
+    palette: CoverPalette,
+    durationMs: Long,
+    positionMs: () -> Long,
+    onOpen: () -> Unit,
+    onTogglePlay: () -> Unit,
+) {
+    val base = MaterialTheme.colorScheme.surfaceContainer
+    Surface(onClick = onOpen, color = base) {
+        Column(
+            Modifier.background(
+                Brush.horizontalGradient(listOf(lerp(base, palette.primary, 0.45f), lerp(base, palette.primary, 0.12f)))
+            )
+        ) {
+            MiniProgress(palette, durationMs, positionMs)
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -194,16 +225,19 @@ fun MiniPlayer(track: Track, isPlaying: Boolean, onOpen: () -> Unit, onTogglePla
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     Text(
                         track.artist ?: stringResource(R.string.unknown_artist),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.secondary,
                     )
                 }
-                IconButton(onClick = onTogglePlay) {
+                FilledIconButton(
+                    onClick = onTogglePlay,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = palette.tertiary, contentColor = Color.Black),
+                ) {
                     if (isPlaying) {
                         Icon(Icons.Default.Pause, stringResource(R.string.pause))
                     } else {
@@ -269,5 +303,21 @@ private fun PlayingBars(animate: Boolean, color: Color) {
                 size = Size(2f * unit, h),
             )
         }
+    }
+}
+
+/** A plain, thin progress line along the top of the mini player. */
+@Composable
+private fun MiniProgress(palette: CoverPalette, durationMs: Long, positionMs: () -> Long) {
+    var position by remember { mutableLongStateOf(positionMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            position = positionMs()
+            delay(500)
+        }
+    }
+    val fraction = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    Box(Modifier.fillMaxWidth().height(3.dp).background(palette.primary.copy(alpha = 0.25f))) {
+        Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(palette.tertiary))
     }
 }

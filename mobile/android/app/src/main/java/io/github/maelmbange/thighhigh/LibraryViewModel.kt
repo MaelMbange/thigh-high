@@ -116,6 +116,24 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private val _refreshing = MutableStateFlow(false)
+
+    /** True while a rescan started by pulling the list down is running. */
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    /** Rescans the music folder for the pull-to-refresh gesture. */
+    fun pullRefresh() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _tracks.value = scanLibrary(getApplication())
+            } finally {
+                _refreshing.value = false
+            }
+        }
+    }
+
     /** Plays [track], queueing the whole list so next/previous follow it, and opens the player. */
     fun play(track: Track) {
         playerOpen.value = true
