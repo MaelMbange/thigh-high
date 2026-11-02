@@ -55,6 +55,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -158,7 +160,16 @@ fun LibraryScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        if (genreScan != null) GenreScanBanner(genreScan)
+        // Fades away once the result has been shown for a while.
+        var lastScan by remember { mutableStateOf(genreScan) }
+        if (genreScan != null) lastScan = genreScan
+        AnimatedVisibility(
+            visible = genreScan != null,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            lastScan?.let { GenreScanBanner(it) }
+        }
         // Pull the list down to rescan the music folder.
         // Pull the list down to rescan the music folder: a faded banner slides
         // in above the list instead of the usual spinning icon.
@@ -551,17 +562,34 @@ fun SwipeToReveal(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            // The icon and the label each appear only once the gap is wide
-            // enough to hold them, so neither gets cut while the row slides.
+            // The icon and its label come out of a blur as the gap opens:
+            // sharp and fully shown once the row is open.
             val revealed = with(LocalDensity.current) { (-offset).toDp() }
+            val iconIn = ((revealed - 16.dp) / 40.dp).coerceIn(0f, 1f)
+            val labelIn = ((revealed - 72.dp) / 20.dp).coerceIn(0f, 1f)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (revealed >= 40.dp) Icon(icon, null, tint = Color.White)
-                if (revealed >= actionWidth - 8.dp) {
+                Icon(
+                    icon,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .blur(((1f - iconIn) * 8f).dp, BlurredEdgeTreatment.Unbounded)
+                        .graphicsLayer {
+                            alpha = iconIn
+                            scaleX = 0.7f + 0.3f * iconIn
+                            scaleY = 0.7f + 0.3f * iconIn
+                        },
+                )
+                if (labelIn > 0f) {
                     Text(
                         stringResource(label),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .blur(((1f - labelIn) * 6f).dp, BlurredEdgeTreatment.Unbounded)
+                            .graphicsLayer { alpha = labelIn },
                     )
                 }
             }

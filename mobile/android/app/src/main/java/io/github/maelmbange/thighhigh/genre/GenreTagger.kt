@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -51,6 +52,9 @@ data class GenreScan(val done: Int, val total: Int, val found: Int, val failed: 
 }
 
 /** Analyses every track of the library that has no genre (the terminal app's `g`). */
+/** How long the result of a scan stays on screen. */
+private const val RESULT_SHOWN_MS = 12_000L
+
 class GenreScanner(context: Context) {
     private val app = context.applicationContext
     private val scope = CoroutineScope(
@@ -91,6 +95,9 @@ class GenreScanner(context: Context) {
                 state = state.copy(done = state.done + 1)
                 _progress.value = state
             }
+            // The result stays up a moment, then the banner goes away by itself.
+            delay(RESULT_SHOWN_MS)
+            _progress.compareAndSet(state, null)
         }
     }
 
