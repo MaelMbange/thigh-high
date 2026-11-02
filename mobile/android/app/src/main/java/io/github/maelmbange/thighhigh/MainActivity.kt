@@ -177,7 +177,6 @@ class MainActivity : ComponentActivity() {
                         MiniPlayer(
                             current,
                             playback.isPlaying,
-                            palette = cover.palette,
                             durationMs = playback.durationMs,
                             positionMs = viewModel::positionMs,
                             onOpen = { viewModel.playerOpen.value = true },

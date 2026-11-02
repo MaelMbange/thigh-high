@@ -203,20 +203,21 @@ private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: 
 fun MiniPlayer(
     track: Track,
     isPlaying: Boolean,
-    palette: CoverPalette,
     durationMs: Long,
     positionMs: () -> Long,
     onOpen: () -> Unit,
     onTogglePlay: () -> Unit,
 ) {
+    // Fixed Catppuccin colors, like the list, whatever the cover looks like.
     val base = MaterialTheme.colorScheme.surfaceContainer
+    val accent = ListColors.playing
     Surface(onClick = onOpen, color = base) {
         Column(
             Modifier.background(
-                Brush.horizontalGradient(listOf(lerp(base, palette.primary, 0.45f), lerp(base, palette.primary, 0.12f)))
+                Brush.horizontalGradient(listOf(lerp(base, accent, 0.30f), lerp(base, accent, 0.08f)))
             )
         ) {
-            MiniProgress(palette, durationMs, positionMs)
+            MiniProgress(durationMs, positionMs)
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -225,18 +226,24 @@ fun MiniPlayer(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        track.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ListColors.title,
+                    )
                     Text(
                         track.artist ?: stringResource(R.string.unknown_artist),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall,
-                        color = palette.secondary,
+                        color = ListColors.artist,
                     )
                 }
                 FilledIconButton(
                     onClick = onTogglePlay,
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = palette.tertiary, contentColor = Color.Black),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = accent, contentColor = Color.Black),
                 ) {
                     if (isPlaying) {
                         Icon(Icons.Default.Pause, stringResource(R.string.pause))
@@ -308,7 +315,7 @@ private fun PlayingBars(animate: Boolean, color: Color) {
 
 /** A plain, thin progress line along the top of the mini player. */
 @Composable
-private fun MiniProgress(palette: CoverPalette, durationMs: Long, positionMs: () -> Long) {
+private fun MiniProgress(durationMs: Long, positionMs: () -> Long) {
     var position by remember { mutableLongStateOf(positionMs()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -317,7 +324,7 @@ private fun MiniProgress(palette: CoverPalette, durationMs: Long, positionMs: ()
         }
     }
     val fraction = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    Box(Modifier.fillMaxWidth().height(3.dp).background(palette.primary.copy(alpha = 0.25f))) {
-        Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(palette.tertiary))
+    Box(Modifier.fillMaxWidth().height(3.dp).background(ListColors.duration.copy(alpha = 0.35f))) {
+        Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(ListColors.playing))
     }
 }
