@@ -453,7 +453,7 @@ fun PermissionScreen(onGrant: () -> Unit) {
     }
 }
 
-private fun formatDuration(d: Duration): String {
+internal fun formatDuration(d: Duration): String {
     val s = d.inWholeSeconds
     return "%d:%02d".format(s / 60, s % 60)
 }

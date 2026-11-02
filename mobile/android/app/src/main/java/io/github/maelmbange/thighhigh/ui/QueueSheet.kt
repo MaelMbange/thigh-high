@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import io.github.maelmbange.thighhigh.QueueEntry
@@ -180,12 +181,14 @@ fun QueuePanel(
                         leadingContent = { Icon(Icons.Default.GraphicEq, null, tint = MaterialTheme.colorScheme.onPrimary) },
                         headlineContent = { Text(current.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold) },
                         supportingContent = {
-                            Text(current.artist ?: stringResource(R.string.unknown_artist), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            ArtistAndGenre(current.artist, current.genre, MaterialTheme.colorScheme.onPrimary)
                         },
+                        trailingContent = current.duration?.let { d -> { Text(formatDuration(d)) } },
                         colors = ListItemDefaults.colors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             headlineColor = MaterialTheme.colorScheme.onPrimary,
                             supportingColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                            trailingIconColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     )
                 }
@@ -229,14 +232,30 @@ private fun SectionLabel(text: String) {
     )
 }
 
+/** "Artist · genre", the genre in its own color, as in the library list. */
+@Composable
+private fun ArtistAndGenre(artist: String?, genre: String?, genreColor: androidx.compose.ui.graphics.Color) {
+    val name = artist ?: stringResource(R.string.unknown_artist)
+    Text(
+        androidx.compose.ui.text.buildAnnotatedString {
+            append(name)
+            if (genre != null) {
+                append(" · ")
+                withStyle(androidx.compose.ui.text.SpanStyle(color = genreColor)) { append(genre) }
+            }
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
 @Composable
 private fun QueueRow(entry: QueueEntry, modifier: Modifier, onClick: () -> Unit) {
     ListItem(
         modifier = modifier.clickable(onClick = onClick),
         headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
-            Text(entry.artist ?: stringResource(R.string.unknown_artist), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        },
+        supportingContent = { ArtistAndGenre(entry.artist, entry.genre, TextColors.genre) },
+        trailingContent = entry.duration?.let { d -> { Text(formatDuration(d)) } },
         colors = ListItemDefaults.colors(
             // Opaque, so the red action stays hidden until the row slides.
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

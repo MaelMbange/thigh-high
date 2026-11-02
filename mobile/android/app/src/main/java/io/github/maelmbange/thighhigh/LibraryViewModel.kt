@@ -68,7 +68,14 @@ data class PlaybackState(
 )
 
 /** A track waiting in the queue, at [index] in the player's list. */
-data class QueueEntry(val index: Int, val id: Long?, val title: String, val artist: String?)
+data class QueueEntry(
+    val index: Int,
+    val id: Long?,
+    val title: String,
+    val artist: String?,
+    val genre: String? = null,
+    val duration: kotlin.time.Duration? = null,
+)
 
 /** The covers of the tracks before and after the current one, when known. */
 data class Neighbors(val previous: Cover? = null, val next: Cover? = null)
@@ -469,12 +476,19 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         return entries.reversed()
     }
 
-    private fun MediaItem.toEntry(index: Int) = QueueEntry(
-        index = index,
-        id = mediaId.toLongOrNull(),
-        title = mediaMetadata.title?.toString() ?: "?",
-        artist = mediaMetadata.artist?.toString(),
-    )
+    private fun MediaItem.toEntry(index: Int): QueueEntry {
+        val id = mediaId.toLongOrNull()
+        // The library knows the length (the queue only has it for the playing track).
+        val track = id?.let { i -> _tracks.value?.firstOrNull { it.id == i } }
+        return QueueEntry(
+            index = index,
+            id = id,
+            title = mediaMetadata.title?.toString() ?: "?",
+            artist = mediaMetadata.artist?.toString(),
+            genre = track?.genre ?: mediaMetadata.genre?.toString(),
+            duration = track?.duration,
+        )
+    }
 
     /** The tracks after the current one, following the shuffle order when it is on. */
     private fun upNextOf(player: Player): List<QueueEntry> {
