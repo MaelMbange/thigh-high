@@ -100,7 +100,7 @@ private fun JobCard(job: DownloadJob, onCancel: () -> Unit, onDismiss: () -> Uni
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(job.title ?: job.url, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(job.title ?: job.url, maxLines = 1, overflow = TextOverflow.Ellipsis, color = TextColors.title)
                 val status = when (job.status) {
                     DownloadStatus.Waiting -> stringResource(R.string.download_waiting)
                     DownloadStatus.Downloading -> job.percent?.let { "%.0f %%".format(it) }

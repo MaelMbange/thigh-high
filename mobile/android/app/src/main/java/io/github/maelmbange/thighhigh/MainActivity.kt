@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.IntentSenderRequest
+import io.github.maelmbange.thighhigh.ui.TextColors
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -119,6 +121,11 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestMultiplePermissions()
         ) { result -> granted = result[AUDIO_PERMISSION] == true || hasAudioPermission() }
 
+        // Android shows its own "delete this file?" dialog; its answer comes back here.
+        val deleteLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult()
+        ) { result -> viewModel.onDeleteConfirmed(result.resultCode == RESULT_OK) }
+
         LaunchedEffect(Unit) {
             if (!granted) launcher.launch(REQUESTED_PERMISSIONS)
         }
@@ -153,7 +160,8 @@ class MainActivity : ComponentActivity() {
                             when (tab) {
                                 Tab.Library -> stringResource(R.string.app_name)
                                 Tab.Download -> stringResource(R.string.tab_download)
-                            }
+                            },
+                            color = TextColors.title,
                         )
                     },
                     actions = {
@@ -200,6 +208,7 @@ class MainActivity : ComponentActivity() {
                             playback.isPlaying,
                             durationMs = playback.durationMs,
                             positionMs = viewModel::positionMs,
+                            onNext = { viewModel.next() },
                             onOpen = { viewModel.playerOpen.value = true },
                             onTogglePlay = viewModel::togglePlayPause,
                         )
@@ -233,6 +242,11 @@ class MainActivity : ComponentActivity() {
                             refreshing = refreshing,
                             onRefresh = viewModel::pullRefresh,
                             onTrackClick = viewModel::play,
+                            onDelete = { track ->
+                                viewModel.delete(track)?.let {
+                                    deleteLauncher.launch(IntentSenderRequest.Builder(it).build())
+                                }
+                            },
                             onClearFilter = { viewModel.filter.value = null },
                         )
 

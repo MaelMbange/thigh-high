@@ -1,5 +1,12 @@
 package io.github.maelmbange.thighhigh.ui
 
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -90,9 +97,32 @@ fun PlayerScreen(
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
     val background = MaterialTheme.colorScheme.background
+    // How far the screen is pulled down by the finger. Dragging the top of the
+    // screen moves it with the finger; letting go with a downward flick (or
+    // past a third of the screen) minimizes, anything else springs back.
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var screenHeight by remember { mutableFloatStateOf(1f) }
+    val pullDown = Modifier.draggable(
+        orientation = Orientation.Vertical,
+        state = rememberDraggableState { delta -> dragOffset = (dragOffset + delta).coerceAtLeast(0f) },
+        onDragStopped = { velocity ->
+            val dismiss = when {
+                velocity > 800f -> true
+                velocity < -300f -> false
+                else -> dragOffset > screenHeight / 3
+            }
+            if (dismiss) {
+                onMinimize()
+            } else {
+                animate(dragOffset, 0f) { value, _ -> dragOffset = value }
+            }
+        },
+    )
     Column(
         Modifier
             .fillMaxSize()
+            .onSizeChanged { screenHeight = it.height.toFloat() }
+            .graphicsLayer { translationY = dragOffset }
             // Swallow every touch that no control takes, so taps never reach the
             // library and tabs drawn underneath.
             .pointerInput(Unit) {
@@ -104,7 +134,7 @@ fun PlayerScreen(
             .systemBarsPadding()
             .padding(horizontal = 16.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().then(pullDown), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onMinimize) {
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
@@ -116,7 +146,7 @@ fun PlayerScreen(
         }
 
         Box(
-            Modifier.fillMaxWidth().weight(1f),
+            Modifier.fillMaxWidth().weight(1f).then(pullDown),
             contentAlignment = Alignment.Center,
         ) {
             Crossfade(showCover, label = "visual") { coverShown ->
@@ -132,13 +162,14 @@ fun PlayerScreen(
             track.title,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
+            color = TextColors.title,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             track.artist ?: stringResource(R.string.unknown_artist),
             style = MaterialTheme.typography.titleMedium,
-            color = palette.secondary,
+            color = TextColors.artist,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -153,8 +184,8 @@ fun PlayerScreen(
             IconButton(onClick = onCycleRepeat) {
                 when (playback.repeat) {
                     Repeat.Off -> Icon(Icons.Default.Repeat, stringResource(R.string.repeat_off))
-                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = palette.secondary)
-                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = palette.secondary)
+                    Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = Catppuccin.Green)
+                    Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = Catppuccin.Green)
                 }
             }
             IconButton(onClick = onPrevious, Modifier.size(56.dp)) {
@@ -278,8 +309,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val shown = dragFraction?.let { (it * duration).toLong() } ?: position
-            Text(formatMs(shown), style = MaterialTheme.typography.bodySmall)
-            Text(formatMs(duration), style = MaterialTheme.typography.bodySmall)
+            Text(formatMs(shown), style = MaterialTheme.typography.bodySmall, color = TextColors.info)
+            Text(formatMs(duration), style = MaterialTheme.typography.bodySmall, color = TextColors.info)
         }
     }
 }

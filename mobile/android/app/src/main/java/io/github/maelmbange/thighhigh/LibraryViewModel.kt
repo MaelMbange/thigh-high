@@ -3,6 +3,10 @@ package io.github.maelmbange.thighhigh
 import android.app.Application
 import android.content.ComponentName
 import android.graphics.Bitmap
+import android.app.RecoverableSecurityException
+import android.content.IntentSender
+import android.os.Build
+import android.provider.MediaStore
 import android.util.Size
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -151,6 +155,52 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track), 0L)
         c.prepare()
         c.play()
+    }
+
+    /** The track waiting for the user to confirm its deletion in a system dialog. */
+    private var pendingDelete: Track? = null
+
+    /**
+     * Deletes [track] from the phone. Returns the system confirmation dialog to
+     * show when Android asks the user first (always from Android 11), or null
+     * when the file is already gone.
+     */
+    fun delete(track: Track): IntentSender? {
+        val resolver = getApplication<Application>().contentResolver
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pendingDelete = track
+            return MediaStore.createDeleteRequest(resolver, listOf(track.uri)).intentSender
+        }
+        return try {
+            resolver.delete(track.uri, null, null)
+            onDeleted(track)
+            null
+        } catch (e: RecoverableSecurityException) {
+            pendingDelete = track
+            e.userAction.actionIntent.intentSender
+        }
+    }
+
+    /** The user answered the system dialog opened by [delete]. */
+    fun onDeleteConfirmed(confirmed: Boolean) {
+        val track = pendingDelete ?: return
+        pendingDelete = null
+        if (!confirmed) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // Android 10 only granted access: the file still has to be deleted.
+            runCatching { getApplication<Application>().contentResolver.delete(track.uri, null, null) }
+        }
+        onDeleted(track)
+    }
+
+    /** Drops a deleted track from the play queue and the list. */
+    private fun onDeleted(track: Track) {
+        controller?.let { c ->
+            (0 until c.mediaItemCount)
+                .firstOrNull { c.getMediaItemAt(it).mediaId == track.id.toString() }
+                ?.let(c::removeMediaItem)
+        }
+        refresh()
     }
 
     /** Detects the genre of every track that has none (the terminal app's `g`). */

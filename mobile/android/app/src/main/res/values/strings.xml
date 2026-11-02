@@ -30,6 +30,7 @@
     <string name="show_cover">Afficher la pochette</string>
     <string name="show_scope">Afficher l\'oscilloscope</string>
     <string name="next">Suivant</string>
+    <string name="delete">Supprimer</string>
     <string name="previous">Précédent</string>
     <string name="stop">Stop</string>
     <string name="repeat_off">Boucle désactivée</string>

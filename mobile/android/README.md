@@ -11,8 +11,11 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
 - Tapping a track plays it, queues the rest of the list and opens the
   full-screen player: the cover art (top-right button switches to an
   oscilloscope of what you hear, drawn in dots like the terminal's braille scope), loop (off / list / track), previous, play/pause,
-  next, stop and a seek bar made of bars that dance with the music, the position dot riding on top of them. The top-left button (or Back) shrinks it to a bar
-  above the tabs without stopping the music; tap the bar to open it again.
+  next, stop and a seek bar made of bars that dance with the music, the position dot riding on top of them. The top-left button (or Back), or dragging the top of the
+  screen down, shrinks it to a bar above the tabs without stopping the music; the bar has
+  play/pause and next buttons and a progress line, tap it to open the player again.
+- Swiping a track to the left shows a delete button; Android asks to confirm before the
+  file is removed.
 - The filter button drops a menu that narrows the library to one artist, genre or album, and
   "Detect missing genres" in the ⋮ menu runs the genre model on every track
   without one (the terminal app's `f` and `g`). New downloads get their genre
@@ -20,8 +23,10 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
   reached through the JNI bridge in `crates/android`; tracks are decoded with
   Android's own codecs. Files put in the folder by another app can't be
   edited by thigh-high, so their genre stays unknown.
-- Colors come from the cover art, with the same algorithm as the terminal
-  app (`crates/core/src/cover.rs`, ported in `ui/CoverPalette.kt`).
+- The full player's background, oscilloscope, seek bar and play button take the cover
+  art's colors, with the same algorithm as the terminal app (`crates/core/src/cover.rs`,
+  ported in `ui/CoverPalette.kt`). Text keeps the same Catppuccin color on every screen
+  (`ui/Theme.kt`), and the loop button lights up in Green.
 - Playback runs in a media service, so it keeps going in the background with
   the system's media notification and lock-screen controls.
 - The download screen takes a link (pasted, or shared from the YouTube app

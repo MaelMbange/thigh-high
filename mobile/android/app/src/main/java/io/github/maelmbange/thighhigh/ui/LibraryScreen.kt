@@ -27,6 +27,22 @@ import kotlinx.coroutines.delay
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import androidx.compose.animation.core.animate
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,6 +100,7 @@ fun LibraryScreen(
     refreshing: Boolean,
     onRefresh: () -> Unit,
     onTrackClick: (Track) -> Unit,
+    onDelete: (Track) -> Unit,
     onClearFilter: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -114,7 +131,7 @@ fun LibraryScreen(
                     .fillMaxSize()
                     .graphicsLayer { translationY = bannerHeight.toPx() * state.distanceFraction.coerceIn(0f, 1f) }
             ) {
-                LibraryList(tracks, currentId, isPlaying, onTrackClick)
+                LibraryList(tracks, currentId, isPlaying, onTrackClick, onDelete)
             }
         }
     }
@@ -151,6 +168,7 @@ private fun BoxScope.LibraryList(
     currentId: Long?,
     isPlaying: Boolean,
     onTrackClick: (Track) -> Unit,
+    onDelete: (Track) -> Unit,
 ) {
         when {
             tracks == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -162,20 +180,15 @@ private fun BoxScope.LibraryList(
             )
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(tracks, key = { it.id }) { track ->
-                    TrackRow(track, current = track.id == currentId, animate = isPlaying) { onTrackClick(track) }
+                    SwipeToReveal(onDelete = { onDelete(track) }) {
+                        TrackRow(track, current = track.id == currentId, animate = isPlaying) { onTrackClick(track) }
+                    }
                 }
             }
         }
 }
 
-/** Fixed list colors in the Catppuccin Mocha style, the same for every track. */
-private object ListColors {
-    val title = Color(0xFFB4BEFE) // Lavender
-    val playing = Color(0xFFCBA6F7) // Mauve
-    val artist = Color(0xFF89DCEB) // Sky
-    val genre = Color(0xFFFAB387) // Peach
-    val duration = Color(0xFF7F849C) // Overlay 1
-}
+private val ListColors = TextColors
 
 @Composable
 private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: () -> Unit) {
@@ -213,7 +226,7 @@ private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: 
         colors = ListItemDefaults.colors(
             headlineColor = if (playing) ListColors.playing else ListColors.title,
             supportingColor = ListColors.artist,
-            trailingIconColor = ListColors.duration,
+            trailingIconColor = ListColors.info,
         ),
     )
 }
@@ -226,6 +239,7 @@ fun MiniPlayer(
     positionMs: () -> Long,
     onOpen: () -> Unit,
     onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
 ) {
     // Fixed Catppuccin colors, like the list, whatever the cover looks like.
     val base = MaterialTheme.colorScheme.surfaceContainer
@@ -242,7 +256,7 @@ fun MiniPlayer(
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -269,6 +283,9 @@ fun MiniPlayer(
                     } else {
                         Icon(Icons.Default.PlayArrow, stringResource(R.string.play))
                     }
+                }
+                IconButton(onClick = onNext) {
+                    Icon(Icons.Default.SkipNext, stringResource(R.string.next), tint = TextColors.title)
                 }
             }
         }
@@ -343,7 +360,7 @@ private fun MiniProgress(durationMs: Long, positionMs: () -> Long) {
         }
     }
     val fraction = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    Box(Modifier.fillMaxWidth().height(3.dp).background(ListColors.duration.copy(alpha = 0.35f))) {
+    Box(Modifier.fillMaxWidth().height(3.dp).background(ListColors.info.copy(alpha = 0.35f))) {
         Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(ListColors.playing))
     }
 }
@@ -373,5 +390,55 @@ private fun BoxScope.RefreshBanner(fraction: Float, refreshing: Boolean, height:
             color = ListColors.title.copy(alpha = 0.8f * shown),
             maxLines = 1,
         )
+    }
+}
+
+/**
+ * A list row that slides left under the finger to show a delete action behind
+ * it. It snaps open past half the action's width (or on a quick swipe) and
+ * closes again otherwise, or once the action is used.
+ */
+@Composable
+private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit) {
+    val actionWidth = 96.dp
+    val openOffset = -with(LocalDensity.current) { actionWidth.toPx() }
+    var offset by remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(actionWidth)
+                .background(Catppuccin.Red)
+                .clickable {
+                    scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
+                    onDelete()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Delete, null, tint = Catppuccin.Crust)
+                Text(stringResource(R.string.delete), color = Catppuccin.Crust, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        Box(
+            Modifier
+                .offset { IntOffset(offset.roundToInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta -> offset = (offset + delta).coerceIn(openOffset, 0f) },
+                    onDragStopped = { velocity ->
+                        val open = when {
+                            velocity < -600f -> true
+                            velocity > 600f -> false
+                            else -> offset < openOffset / 2
+                        }
+                        animate(offset, if (open) openOffset else 0f) { v, _ -> offset = v }
+                    },
+                ),
+        ) {
+            content()
+        }
     }
 }
