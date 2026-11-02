@@ -30,6 +30,10 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
     private val ring = FloatArray(CAPACITY)
     private val lock = Any()
 
+    /** Set by the player: the tap is only drawn while the music is actually heard. */
+    @Volatile
+    var playing = false
+
     private var written = 0L
     private var lastWriteNanos = 0L
     private var sampleRate = 44_100
@@ -71,7 +75,9 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
      */
     fun waveform(out: FloatArray): Boolean = synchronized(lock) {
         val sinceWrite = (System.nanoTime() - lastWriteNanos) / 1_000_000
-        if (written == 0L || sinceWrite > STALE_MS) {
+        // Paused or stopped: the player may still fill its buffer (after a seek,
+        // for instance), but none of it is heard, so the trace goes flat at once.
+        if (!playing || written == 0L || sinceWrite > STALE_MS) {
             out.fill(0f)
             return false
         }

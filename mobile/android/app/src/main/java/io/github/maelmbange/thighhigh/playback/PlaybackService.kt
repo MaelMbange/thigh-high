@@ -6,6 +6,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -40,6 +41,11 @@ class PlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                AudioTap.playing = isPlaying
+            }
+        })
         session = MediaSession.Builder(this, player)
             .setCallback(ResolveTrackUris)
             .build()
@@ -56,6 +62,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        AudioTap.playing = false
         session?.run {
             player.release()
             release()
