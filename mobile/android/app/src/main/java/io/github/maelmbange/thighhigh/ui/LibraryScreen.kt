@@ -6,7 +6,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import kotlin.math.PI
@@ -239,36 +238,35 @@ private fun formatDuration(d: Duration): String {
 }
 
 /**
- * Four small bars for the current track. They sway gently while it plays and
- * rest at fixed heights when it is paused or stopped.
+ * The five-bar equalizer icon drawn for the current track, on the same 24-unit
+ * grid as the Material GraphicEq icon. The bars sway gently while it plays and
+ * keep the icon's own shape when it is paused or stopped.
  */
 @Composable
 private fun PlayingBars(animate: Boolean, color: Color) {
-    val rest = floatArrayOf(0.55f, 0.85f, 0.65f, 0.4f)
+    // Heights of the GraphicEq bars, in units of its 24-unit grid.
+    val rest = floatArrayOf(4f, 12f, 20f, 12f, 4f)
     val time = if (animate) {
         val transition = rememberInfiniteTransition(label = "bars")
         transition.animateFloat(
             initialValue = 0f,
             targetValue = (2 * PI).toFloat(),
-            animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing)),
+            animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing)),
             label = "phase",
         ).value
     } else {
         null
     }
     Canvas(Modifier.size(24.dp)) {
-        val count = rest.size
-        val gap = size.width / (count * 3 - 1)
-        val barWidth = gap * 2
-        for (i in 0 until count) {
+        val unit = size.width / 24f
+        for (i in rest.indices) {
             // Each bar runs at its own speed and phase so they never move in step.
-            val wave = time?.let { 0.18f * sin(it * (i % 2 + 1) + i * 1.7f) } ?: 0f
-            val h = size.height * (rest[i] + wave).coerceIn(0.2f, 1f)
-            drawRoundRect(
+            val wave = time?.let { 4f * sin(it * (i % 2 + 1) + i * 1.3f) } ?: 0f
+            val h = (rest[i] + wave).coerceIn(3f, 22f) * unit
+            drawRect(
                 color = color,
-                topLeft = Offset(i * (barWidth + gap), size.height - h),
-                size = Size(barWidth, h),
-                cornerRadius = CornerRadius(barWidth / 2),
+                topLeft = Offset((3f + 4f * i) * unit, (size.height - h) / 2),
+                size = Size(2f * unit, h),
             )
         }
     }
