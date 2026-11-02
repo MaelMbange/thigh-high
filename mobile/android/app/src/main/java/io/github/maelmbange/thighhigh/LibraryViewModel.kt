@@ -293,9 +293,20 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun removeQueued(index: Int) {
-        controller?.removeMediaItem(index)
+        val c = controller ?: return
+        // Shown gone at once, and kept so: the controller's guess of the new
+        // queue and the service's answer arrive one after the other and could
+        // show the track again for a frame.
+        val expected = _upNext.value.filterNot { it.index == index }
+            .map { if (it.index > index) it.copy(index = it.index - 1) else it }
+        _upNext.value = expected
+        pendingQueue = expected.map { it.id } to System.currentTimeMillis()
+        c.removeMediaItem(index)
         queueSource = null
     }
+
+    /** The queue a removal should lead to, and when it was asked: see [removeQueued]. */
+    private var pendingQueue: Pair<List<Long?>, Long>? = null
 
     fun createPlaylist(name: String, with: Track? = null): Playlist =
         playlistStore.create(name, listOfNotNull(with?.id))
@@ -444,7 +455,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun positionMs(): Long = controller?.currentPosition ?: 0L
 
     private fun syncState(player: Player) {
-        _upNext.value = upNextOf(player)
+        val upNext = upNextOf(player)
+        val pending = pendingQueue
+        if (pending != null) {
+            val settled = upNext.map { it.id } == pending.first ||
+                System.currentTimeMillis() - pending.second > 1_000
+            if (settled) pendingQueue = null
+        }
+        if (pendingQueue == null) _upNext.value = upNext
         _history.value = historyOf(player)
         val prevId = player.previousMediaItemIndex.takeIf { it != C.INDEX_UNSET }
             ?.let { player.getMediaItemAt(it).mediaId.toLongOrNull() }

@@ -172,7 +172,7 @@ fun QueuePanel(
             LazyColumn(Modifier.fillMaxSize().nestedScroll(connection), state = listState) {
                 if (history.isNotEmpty()) {
                     item { SectionLabel(stringResource(R.string.queue_history)) }
-                    items(history, key = { "h${it.index}" }) { entry ->
+                    items(withKeys("h", history), key = { it.first }) { (_, entry) ->
                         QueueRow(entry, Modifier.graphicsLayer { alpha = 0.5f }, onClick = { onPlay(entry.index) })
                     }
                 }
@@ -203,12 +203,14 @@ fun QueuePanel(
                     }
                 } else {
                     item { SectionLabel(stringResource(R.string.queue)) }
-                    items(upNext, key = { "n${it.index}" }) { entry ->
+                    items(withKeys("n", upNext), key = { it.first }) { (_, entry) ->
                         // Taking a track out takes two steps, like deleting
                         // one from the library: slide it left, then tap "Retirer".
                         Box(Modifier.animateItem()) {
                             SwipeToReveal(
                                 onAction = { onRemove(entry.index) },
+                                // The row fades out where it is, open: closing it first made it blink.
+                                closeOnAction = false,
                                 icon = Icons.Default.RemoveCircleOutline,
                                 label = R.string.remove,
                             ) {
@@ -219,6 +221,20 @@ fun QueuePanel(
                 }
             }
         }
+    }
+}
+
+/**
+ * Keys that stay with a track when the queue changes around it: its position
+ * in the queue shifts on every removal, which handed the removed row's key
+ * (and its open swipe) to the track below it.
+ */
+private fun withKeys(prefix: String, entries: List<QueueEntry>): List<Pair<String, QueueEntry>> {
+    val seen = HashMap<String, Int>()
+    return entries.map { e ->
+        val id = e.id?.toString() ?: e.title
+        val n = seen.merge(id, 1, Int::plus)!!
+        "$prefix$id#$n" to e
     }
 }
 

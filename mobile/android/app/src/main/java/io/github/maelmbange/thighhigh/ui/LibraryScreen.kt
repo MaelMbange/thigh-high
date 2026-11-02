@@ -547,6 +547,8 @@ fun SwipeToReveal(
     onAction: () -> Unit,
     icon: ImageVector = Icons.Default.Delete,
     label: Int = R.string.delete,
+    /** Slides the row back once the action is tapped; off when the row goes away at once. */
+    closeOnAction: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val actionWidth = 96.dp
@@ -564,7 +566,7 @@ fun SwipeToReveal(
                 .width(with(LocalDensity.current) { (-offset).toDp() })
                 .background(DeleteRed)
                 .clickable {
-                    scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
+                    if (closeOnAction) scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
                     onAction()
                 },
             contentAlignment = Alignment.Center,
