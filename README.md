@@ -10,6 +10,17 @@ cargo run
 
 Downloaded music is stored in your Music folder under `thigh-high`.
 
+## Project layout
+
+The repository is a Cargo workspace:
+
+- `crates/core`: logic shared with the upcoming Android app (library and tags,
+  filters, cover-art colors, audio analysis for the animations, genre model).
+  It never starts a process or picks a folder.
+- `crates/tui`: the terminal app (ratatui UI, playback and downloads through
+  ffmpeg and yt-dlp).
+- `assets`: the genre model and its mel filterbank.
+
 ## Now playing
 
 An animation fills the top of the Now playing panel: by default an

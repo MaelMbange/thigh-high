@@ -111,7 +111,10 @@ fn run(id: usize, cmd: &mut Command, tx: &Sender<AppEvent>) -> Result<PathBuf, S
         Some(path) if status.success() => {
             // Never leave a video in the music folder.
             let _ = fs::remove_file(&path);
-            Err(format!("no audio file came out of this link ({})", ext(&path)))
+            Err(format!(
+                "no audio file came out of this link ({})",
+                ext(&path)
+            ))
         }
         _ => {
             // Extraction failed (typically a video with no sound): the video

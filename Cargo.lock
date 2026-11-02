@@ -2764,15 +2764,24 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "dirs",
- "image",
  "lofty",
  "ratatui",
  "rodio",
- "rustfft",
- "tract-onnx",
+ "thigh-high-core",
  "ureq",
  "which",
  "zip",
+]
+
+[[package]]
+name = "thigh-high-core"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "image",
+ "lofty",
+ "rustfft",
+ "tract-onnx",
 ]
 
 [[package]]

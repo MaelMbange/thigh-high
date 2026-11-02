@@ -4,28 +4,21 @@
 //! The model looks at 3-second log-mel spectrograms of 16 kHz mono audio
 //! and scores 50 tags; we average a few patches and keep the best genre.
 
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
-use std::thread;
 use std::time::Duration;
 
-use color_eyre::Result;
-use color_eyre::eyre::{bail, eyre};
+use eyre::{Result, bail, eyre};
 use rustfft::num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 use tract_onnx::prelude::*;
 
-use crate::app::AppEvent;
-use crate::tools;
-
-const MODEL: &[u8] = include_bytes!("../assets/musicnn-msd.onnx");
+const MODEL: &[u8] = include_bytes!("../../../assets/musicnn-msd.onnx");
 /// librosa's Slaney mel filterbank for 16 kHz, n_fft 512, 96 bands (96 × 257 f32).
-const MEL_FILTERS: &[u8] = include_bytes!("../assets/mel_filters_96x257.f32");
+const MEL_FILTERS: &[u8] = include_bytes!("../../../assets/mel_filters_96x257.f32");
 
-const SAMPLE_RATE: u32 = 16_000;
+/// Sample rate the model expects: callers decode to 16 kHz mono.
+pub const SAMPLE_RATE: u32 = 16_000;
 const N_FFT: usize = 512;
 const HOP: usize = 256;
 const N_MELS: usize = 96;
@@ -33,7 +26,7 @@ const N_BINS: usize = N_FFT / 2 + 1;
 /// Frames per model input: 3 seconds.
 const PATCH: usize = 187;
 /// Seconds of audio analysed, taken from the middle of the track.
-const EXCERPT_SECONDS: f64 = 30.0;
+pub const EXCERPT_SECONDS: f64 = 30.0;
 
 /// The model's 50 tags, in output order.
 const TAGS: [&str; 50] = [
@@ -140,15 +133,10 @@ impl Classifier {
         })
     }
 
-    /// The most likely genre of the audio file, or None if no genre stands out.
-    pub fn detect(
-        &self,
-        ffmpeg: &Path,
-        file: &Path,
-        duration: Option<Duration>,
-    ) -> Result<Option<String>> {
-        let audio = load_excerpt(ffmpeg, file, duration)?;
-        let scores = self.tag_scores(&audio)?;
+    /// The most likely genre of an excerpt decoded as [`SAMPLE_RATE`] mono
+    /// samples, or None if no genre stands out.
+    pub fn detect(&self, audio: &[f32]) -> Result<Option<String>> {
+        let scores = self.tag_scores(audio)?;
         Ok(best_genre(&scores))
     }
 
@@ -212,38 +200,6 @@ impl Classifier {
     }
 }
 
-/// A track waiting to be analysed.
-pub struct Job {
-    pub path: PathBuf,
-    pub duration: Option<Duration>,
-}
-
-/// Starts the background thread that analyses tracks one at a time and
-/// reports each result as an [`AppEvent::GenreDetected`]. The model is loaded
-/// on the first job, so it costs nothing until a track needs it.
-pub fn spawn_worker(ffmpeg: PathBuf, events: Sender<AppEvent>) -> Sender<Job> {
-    let (jobs, queue) = mpsc::channel::<Job>();
-    thread::spawn(move || {
-        let mut classifier = None;
-        for job in queue {
-            let result = match &classifier {
-                Some(c) => Ok(c),
-                None => Classifier::new().map(|c| &*classifier.insert(c)),
-            }
-            .and_then(|c| c.detect(&ffmpeg, &job.path, job.duration))
-            .map_err(|e| e.to_string());
-            let event = AppEvent::GenreDetected {
-                path: job.path,
-                result,
-            };
-            if events.send(event).is_err() {
-                break;
-            }
-        }
-    });
-    jobs
-}
-
 fn load_model() -> TractResult<Arc<TypedRunnableModel>> {
     tract_onnx::onnx()
         .model_for_read(&mut std::io::Cursor::new(MODEL))?
@@ -252,35 +208,11 @@ fn load_model() -> TractResult<Arc<TypedRunnableModel>> {
         .into_runnable()
 }
 
-/// Decodes up to 30 s from the middle of the track as 16 kHz mono samples.
-fn load_excerpt(ffmpeg: &Path, file: &Path, duration: Option<Duration>) -> Result<Vec<f32>> {
-    let start = duration
+/// Where to start the [`EXCERPT_SECONDS`] excerpt: the middle of the track.
+pub fn excerpt_start(duration: Option<Duration>) -> f64 {
+    duration
         .map(|d| (d.as_secs_f64() / 2.0 - EXCERPT_SECONDS / 2.0).max(0.0))
-        .unwrap_or(0.0);
-    let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-nostdin", "-loglevel", "quiet", "-ss"])
-        .arg(format!("{start:.3}"))
-        .arg("-t")
-        .arg(EXCERPT_SECONDS.to_string())
-        .arg("-i")
-        .arg(file)
-        .args(["-vn", "-ac", "1", "-ar"])
-        .arg(SAMPLE_RATE.to_string())
-        .args(["-f", "f32le", "-"]);
-    tools::quiet(&mut cmd);
-    cmd.stdout(Stdio::piped());
-    let mut child = cmd.spawn()?;
-    let mut bytes = Vec::new();
-    child
-        .stdout
-        .take()
-        .ok_or_else(|| eyre!("no ffmpeg output"))?
-        .read_to_end(&mut bytes)?;
-    child.wait()?;
-    Ok(bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .collect())
+        .unwrap_or(0.0)
 }
 
 /// Picks the genre whose strongest tag scores highest, if it's convincing enough.
@@ -370,44 +302,5 @@ mod tests {
         let folk = scores[TAGS.iter().position(|t| *t == "folk").unwrap()];
         assert!((folk - 0.30).abs() < 0.02, "folk scored {folk}");
         assert_eq!(best_genre(&scores).as_deref(), Some("Folk"));
-    }
-
-    /// Runs the whole chain on an encoded file: ffmpeg excerpt, model, tag write.
-    #[test]
-    fn detects_and_saves_the_genre_of_a_file() {
-        let (Ok(ffmpeg), true) = (
-            which::which("ffmpeg"),
-            Path::new("/tmp/claude-0/mcnn/fishin_16k.f32").exists(),
-        ) else {
-            return;
-        };
-        let file = std::env::temp_dir().join("thigh-high-genre-test.opus");
-        let status = Command::new(&ffmpeg)
-            .args([
-                "-y",
-                "-loglevel",
-                "error",
-                "-f",
-                "f32le",
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-            ])
-            .args(["-i", "/tmp/claude-0/mcnn/fishin_16k.f32"])
-            .arg(&file)
-            .status()
-            .unwrap();
-        assert!(status.success());
-
-        let genre = Classifier::new()
-            .unwrap()
-            .detect(&ffmpeg, &file, Some(Duration::from_secs(30)))
-            .unwrap();
-        assert_eq!(genre.as_deref(), Some("Folk"));
-        save_genre(&file, "Folk").unwrap();
-        let track = crate::library::Track::read(file.clone());
-        assert_eq!(track.genre.as_deref(), Some("Folk"));
-        let _ = std::fs::remove_file(file);
     }
 }

@@ -1,20 +1,19 @@
-[package]
-name = "thigh-high"
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/tui"]
+# `cargo run` at the root still starts the terminal app.
+default-members = ["crates/tui"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-color-eyre = "0.6.5"
-dirs = "7.0.0"
+[workspace.dependencies]
+eyre = "0.6.12"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 lofty = "0.25.4"
-ratatui = "0.30.2"
-rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
 rustfft = "6.4.1"
 tract-onnx = "0.23.8"
-ureq = { version = "3.4.2", features = ["platform-verifier"] }
-which = "8.0.6"
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 # Audio code runs in real time: optimize dependencies even in debug builds so
 # `cargo run` doesn't stutter. Release builds (`cargo run --release`) are fastest.

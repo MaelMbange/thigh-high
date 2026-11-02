@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use color_eyre::Result;
+use eyre::Result;
 use lofty::prelude::*;
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "opus", "ogg", "flac", "wav"];
@@ -52,16 +52,6 @@ impl Track {
         }
         track
     }
-}
-
-/// Where downloaded music lives: `<Music folder>/thigh-high`, created if missing.
-pub fn music_dir() -> Result<PathBuf> {
-    let base = dirs::audio_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let dir = base.join("thigh-high");
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
 }
 
 /// Lists the audio files in `dir`, sorted by title.

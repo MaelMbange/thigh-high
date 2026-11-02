@@ -1,0 +1,15 @@
+[package]
+name = "thigh-high"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thigh-high-core = { path = "../core" }
+color-eyre = "0.6.5"
+dirs = "7.0.0"
+lofty.workspace = true
+ratatui = "0.30.2"
+rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
+ureq = { version = "3.4.2", features = ["platform-verifier"] }
+which = "8.0.6"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

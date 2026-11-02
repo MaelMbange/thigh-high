@@ -1,13 +1,13 @@
 mod app;
-mod cover;
 mod download;
-mod filter;
 mod genre;
 mod library;
 mod player;
 mod tools;
 mod ui;
 mod visualizer;
+
+use thigh_high_core::{cover, filter};
 
 use std::time::Duration;
 
