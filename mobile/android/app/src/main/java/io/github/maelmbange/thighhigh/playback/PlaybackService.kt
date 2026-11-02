@@ -66,6 +66,19 @@ class PlaybackService : MediaSessionService() {
                 AudioTap.playing = isPlaying
             }
 
+            // A random order must start from the track playing: otherwise it can
+            // land anywhere in the order, and the tracks placed before it would
+            // never play (with 3 tracks, sometimes only 1 or 2 were heard).
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                if (shuffleModeEnabled) startShuffleHere(player)
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && player.shuffleModeEnabled) {
+                    startShuffleHere(player)
+                }
+            }
+
             override fun onEvents(player: Player, events: Player.Events) {
                 if (events.containsAny(Player.EVENT_REPEAT_MODE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
                     session?.setMediaButtonPreferences(buttons(player))
@@ -264,6 +277,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val io = Executors.newSingleThreadExecutor()
+
+    /** A new random order: the current track first, every other one after it. */
+    @OptIn(UnstableApi::class)
+    private fun startShuffleHere(player: ExoPlayer) {
+        val count = player.mediaItemCount
+        if (count == 0) return
+        val current = player.currentMediaItemIndex.coerceIn(0, count - 1)
+        val order = listOf(current) + (0 until count).filter { it != current }.shuffled()
+        player.setShuffleOrder(DefaultShuffleOrder(order.toIntArray(), System.nanoTime()))
+    }
 
     /**
      * A track just added with "play next" or "add to queue" must come right
