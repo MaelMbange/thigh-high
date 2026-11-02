@@ -164,12 +164,16 @@ fun PlayerScreen(
         }
         queueJob?.cancel()
         queueJob = scope.launch {
-            animate(queueShown, if (open) 1f else 0f, animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { v, _ ->
-                queueShown = v
-            }
+            // Soft and unhurried, carrying on at the finger's speed when it lets go.
+            animate(
+                queueShown,
+                if (open) 1f else 0f,
+                initialVelocity = -velocity / screenHeight,
+                animationSpec = spring(dampingRatio = 1f, stiffness = QUEUE_STIFFNESS),
+            ) { v, _ -> queueShown = v }
         }
     }
-    BackHandler(enabled = queueShown > 0f) { settleQueue(1_000f) }
+    BackHandler(enabled = queueShown > 0f) { settleQueue(OPEN_VELOCITY) }
 
     // What the current vertical drag does, decided by its first movement.
     var verticalMode by remember { mutableIntStateOf(MODE_NONE) }
@@ -306,6 +310,9 @@ fun PlayerScreen(
             }
         }
 
+        // How hard the bass hits right now, 0 to 1; the buttons and the cover swell with it.
+        val bass = rememberBassLevel()
+
         Box(
             Modifier
                 .fillMaxWidth()
@@ -381,8 +388,10 @@ fun PlayerScreen(
                         translationX = swipe
                         val f = (abs(swipe) / page).coerceIn(0f, 1f)
                         alpha = 1f - f * 0.6f
-                        scaleX = 1f - f * 0.08f
-                        scaleY = 1f - f * 0.08f
+                        // The cover swells gently with the bass, like the play button.
+                        val beat = if (showCover) 1f + PULSE_PER_UNIT * COVER_PULSE * bass.value else 1f
+                        scaleX = (1f - f * 0.08f) * beat
+                        scaleY = (1f - f * 0.08f) * beat
                     },
                 label = "visual",
             ) { coverShown ->
@@ -436,9 +445,6 @@ fun PlayerScreen(
 
         SeekBar(playback, palette, positionMs, onSeek)
 
-        // How hard the bass hits right now, 0 to 1; the buttons swell with it.
-        val bass = rememberBassLevel()
-
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -481,11 +487,13 @@ fun PlayerScreen(
         // or drag up to see what comes next.
         UpNextBanner(
             Modifier.graphicsLayer { alpha = 1f - queueShown },
-            onClick = { settleQueue(-1_000f) },
+            onClick = { settleQueue(-OPEN_VELOCITY) },
         )
         }
 
-        if (queueShown > 0f) {
+        // Always composed, off screen while closed, so opening never waits
+        // for the list to be built.
+        run {
             QueuePanel(
                 shown = { queueShown },
                 screenHeight = screenHeight,
@@ -503,6 +511,12 @@ fun PlayerScreen(
         }
     }
 }
+
+/** How stiff the queue panel's spring is: low, so it rises and falls smoothly. */
+private const val QUEUE_STIFFNESS = 140f
+
+/** The speed of a tap on the banner (or Back), in pixels per second: just enough to cross the threshold. */
+private const val OPEN_VELOCITY = 900f
 
 private const val MODE_NONE = 0
 private const val MODE_DISMISS = 1
@@ -688,6 +702,9 @@ private fun formatMs(ms: Long): String {
 
 /** Each weight unit adds this much size at the strongest bass (play = 3 units). */
 private const val PULSE_PER_UNIT = 0.04f
+
+/** The cover's pulse weight: big as it is, it only breathes (about 2.5 %). */
+private const val COVER_PULSE = 0.6f
 
 /**
  * Grows the control with the bass: [weight] 3 for play, 1.5 for its

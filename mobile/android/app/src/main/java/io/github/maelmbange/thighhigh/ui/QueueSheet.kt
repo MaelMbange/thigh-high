@@ -20,7 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -106,19 +107,29 @@ fun QueuePanel(
         }
     }
 
+    val open by remember { derivedStateOf { fraction() > 0f } }
+    val listState = rememberLazyListState()
+    // Opens on the track playing, the ones already heard just above.
+    val currentRow = if (history.isEmpty()) 0 else history.size + 1
+    LaunchedEffect(open) { if (open) listState.scrollToItem(currentRow) }
     Box(Modifier.fillMaxSize()) {
-        // Dims the player behind; a tap there closes the panel.
-        Box(
+        // Dims the player behind; a tap there closes the panel. Only there
+        // while the panel is, so the player's own taps get through otherwise.
+        if (open) Box(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = fraction() }
                 .background(Color.Black.copy(alpha = 0.55f))
-                .clickable(interactionSource = null, indication = null) { settle(1_000f) }
+                .clickable(interactionSource = null, indication = null) { settle(900f) }
         )
         Column(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { translationY = (1f - fraction()) * screenHeight }
+                .graphicsLayer {
+                    translationY = (1f - fraction()) * screenHeight
+                    // Nothing drawn at all while closed.
+                    alpha = if (fraction() > 0f) 1f else 0f
+                }
                 .statusBarsPadding()
                 .padding(top = 48.dp)
                 .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
@@ -157,10 +168,6 @@ fun QueuePanel(
                 )
             }
 
-            val listState = rememberLazyListState()
-            // Opens on the track playing, the ones already heard just above.
-            val currentRow = if (history.isEmpty()) 0 else history.size + 1
-            LaunchedEffect(Unit) { listState.scrollToItem(currentRow) }
             LazyColumn(Modifier.fillMaxSize().nestedScroll(connection), state = listState) {
                 if (history.isNotEmpty()) {
                     item { SectionLabel(stringResource(R.string.queue_history)) }
@@ -194,12 +201,17 @@ fun QueuePanel(
                 } else {
                     item { SectionLabel(stringResource(R.string.queue)) }
                     items(upNext, key = { "n${it.index}" }) { entry ->
-                        QueueRow(
-                            entry,
-                            Modifier.animateItem(),
-                            onClick = { onPlay(entry.index) },
-                            onRemove = { onRemove(entry.index) },
-                        )
+                        // Taking a track out takes two steps, like deleting
+                        // one from the library: slide it left, then tap "Retirer".
+                        Box(Modifier.animateItem()) {
+                            SwipeToReveal(
+                                onAction = { onRemove(entry.index) },
+                                icon = Icons.Default.RemoveCircleOutline,
+                                label = R.string.remove,
+                            ) {
+                                QueueRow(entry, Modifier, onClick = { onPlay(entry.index) })
+                            }
+                        }
                     }
                 }
             }
@@ -218,20 +230,16 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun QueueRow(entry: QueueEntry, modifier: Modifier, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
+private fun QueueRow(entry: QueueEntry, modifier: Modifier, onClick: () -> Unit) {
     ListItem(
         modifier = modifier.clickable(onClick = onClick),
         headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(entry.artist ?: stringResource(R.string.unknown_artist), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
-        trailingContent = onRemove?.let {
-            {
-                IconButton(onClick = it) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
-            }
-        },
         colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent,
+            // Opaque, so the red action stays hidden until the row slides.
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             headlineColor = TextColors.title,
             supportingColor = TextColors.artist,
         ),

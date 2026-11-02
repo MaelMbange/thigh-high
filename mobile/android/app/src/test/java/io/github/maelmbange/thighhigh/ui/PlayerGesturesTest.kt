@@ -11,6 +11,7 @@ import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import io.github.maelmbange.thighhigh.Cover
 import io.github.maelmbange.thighhigh.PlaybackState
 import io.github.maelmbange.thighhigh.library.Track
@@ -234,6 +235,6 @@ class PlayerGesturesTest {
         show()
         rule.onRoot().performTouchInput { swipeUp(startY = height * 0.8f, endY = height * 0.75f, durationMillis = 800) }
         rule.mainClock.advanceTimeBy(2_000)
-        rule.onNodeWithText("Morceau suivant").assertDoesNotExist()
+        rule.onNodeWithText("Morceau suivant").assertIsNotDisplayed()
     }
 }
