@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOn
 import androidx.compose.material.icons.filled.RepeatOneOn
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.ShuffleOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
@@ -99,6 +101,7 @@ fun PlayerScreen(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
     onSeek: (Long) -> Unit,
 ) {
     val palette = cover.palette
@@ -173,6 +176,10 @@ fun PlayerScreen(
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
             Box(Modifier.weight(1f))
+            IconButton(onClick = onToggleShuffle) {
+                if (playback.shuffle) Icon(Icons.Default.ShuffleOn, stringResource(R.string.shuffle_on), tint = palette.primary)
+                else Icon(Icons.Default.Shuffle, stringResource(R.string.shuffle_off))
+            }
             IconButton(onClick = { showCover = !showCover }) {
                 if (showCover) Icon(Icons.Default.GraphicEq, stringResource(R.string.show_scope))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))

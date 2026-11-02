@@ -48,6 +48,17 @@
     <string name="cancel">Annuler</string>
     <string name="dismiss">Retirer</string>
 
+    <string name="search_hint">Rechercher un titre, un artiste…</string>
+    <string name="search_clear">Effacer la recherche</string>
+    <string name="search_empty">Aucun morceau ne correspond à « %1$s ».</string>
+    <string name="shuffle_play">Aléatoire</string>
+    <string name="shuffle_on">Lecture aléatoire activée</string>
+    <string name="shuffle_off">Lecture aléatoire désactivée</string>
+
+    <plurals name="track_count">
+        <item quantity="one">%1$d morceau</item>
+        <item quantity="other">%1$d morceaux</item>
+    </plurals>
     <plurals name="genre_scan_done">
         <item quantity="one">Genres détectés : %1$d sur %2$d morceau</item>
         <item quantity="other">Genres détectés : %1$d sur %2$d morceaux</item>

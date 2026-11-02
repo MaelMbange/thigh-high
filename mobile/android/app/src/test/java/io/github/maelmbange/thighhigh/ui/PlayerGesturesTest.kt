@@ -62,6 +62,7 @@ class PlayerGesturesTest {
                     onNext = { next++ },
                     onPrevious = { previous++ },
                     onCycleRepeat = {},
+                    onToggleShuffle = {},
                     onSeek = {},
                 )
             }
@@ -94,6 +95,7 @@ class PlayerGesturesTest {
                             onNext = { next++ },
                             onPrevious = { previous++ },
                             onCycleRepeat = {},
+                            onToggleShuffle = {},
                             onSeek = {},
                         )
                     }

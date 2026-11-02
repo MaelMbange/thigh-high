@@ -44,6 +44,16 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -102,8 +112,13 @@ fun LibraryScreen(
     onTrackClick: (Track) -> Unit,
     onDelete: (Track) -> Unit,
     onClearFilter: () -> Unit,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onShufflePlay: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
+        SearchBar(query, onQueryChange)
+        ListHeader(count = tracks?.size, onShufflePlay = onShufflePlay)
         if (filter != null) {
             InputChip(
                 selected = true,
@@ -131,8 +146,62 @@ fun LibraryScreen(
                     .fillMaxSize()
                     .graphicsLayer { translationY = bannerHeight.toPx() * state.distanceFraction.coerceIn(0f, 1f) }
             ) {
-                LibraryList(tracks, currentId, isPlaying, onTrackClick, onDelete)
+                LibraryList(tracks, query, currentId, isPlaying, onTrackClick, onDelete)
             }
+        }
+    }
+}
+
+/** The search field above the list: title, artist, album or genre, accents ignored. */
+@Composable
+private fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
+    val focus = LocalFocusManager.current
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        placeholder = { Text(stringResource(R.string.search_hint), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Default.Search, null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Default.Close, stringResource(R.string.search_clear))
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(28.dp),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.primary,
+            cursorColor = MaterialTheme.colorScheme.primary,
+        ),
+    )
+}
+
+/** How many tracks are shown, and the button that plays them in a random order. */
+@Composable
+private fun ListHeader(count: Int?, onShufflePlay: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            count?.let { pluralStringResource(R.plurals.track_count, it, it) }.orEmpty(),
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextColors.info,
+        )
+        TextButton(onClick = onShufflePlay, enabled = (count ?: 0) > 0) {
+            Icon(Icons.Default.Shuffle, null, Modifier.size(18.dp))
+            Text(stringResource(R.string.shuffle_play), Modifier.padding(start = 6.dp))
         }
     }
 }
@@ -165,6 +234,7 @@ private fun GenreScanBanner(scan: GenreScan) {
 @Composable
 private fun BoxScope.LibraryList(
     tracks: List<Track>?,
+    query: String,
     currentId: Long?,
     isPlaying: Boolean,
     onTrackClick: (Track) -> Unit,
@@ -173,7 +243,8 @@ private fun BoxScope.LibraryList(
         when {
             tracks == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
             tracks.isEmpty() -> Text(
-                stringResource(R.string.library_empty),
+                if (query.isBlank()) stringResource(R.string.library_empty)
+                else stringResource(R.string.search_empty, query.trim()),
                 Modifier.align(Alignment.Center).padding(32.dp),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyLarge,

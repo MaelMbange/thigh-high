@@ -19,6 +19,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.maelmbange.thighhigh.library.Filter
 import io.github.maelmbange.thighhigh.library.Track
+import io.github.maelmbange.thighhigh.library.matchesSearch
 import io.github.maelmbange.thighhigh.library.scanLibrary
 import io.github.maelmbange.thighhigh.playback.PlaybackService
 import io.github.maelmbange.thighhigh.ui.CoverPalette
@@ -55,6 +56,8 @@ data class PlaybackState(
     val isPlaying: Boolean = false,
     val durationMs: Long = 0L,
     val repeat: Repeat = Repeat.Off,
+    /** Next/previous follow a random order of the queue. */
+    val shuffle: Boolean = false,
 )
 
 /** The current track's cover and the colors taken from it. */
@@ -68,9 +71,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** The artist/genre/album filter, or null to show everything. */
     val filter = MutableStateFlow<Filter?>(null)
 
-    /** The tracks shown (and queued when one is played): the library after the filter. */
-    val visibleTracks: StateFlow<List<Track>?> = combine(_tracks, filter) { tracks, f ->
-        if (f == null) tracks else tracks?.filter(f::matches)
+    /** What is typed in the search bar above the list. */
+    val query = MutableStateFlow("")
+
+    /** The tracks shown (and queued when one is played): the library after the filter and the search. */
+    val visibleTracks: StateFlow<List<Track>?> = combine(_tracks, filter, query) { tracks, f, q ->
+        tracks?.filter { (f == null || f.matches(it)) && it.matchesSearch(q) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _playback = MutableStateFlow(PlaybackState())
@@ -155,6 +161,23 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track), 0L)
         c.prepare()
         c.play()
+    }
+
+    /** Plays the list shown in a random order, from a random track. */
+    fun shufflePlay() {
+        val c = controller ?: return
+        val list = visibleTracks.value?.takeIf { it.isNotEmpty() } ?: return
+        playerOpen.value = true
+        c.shuffleModeEnabled = true
+        c.setMediaItems(list.map { it.toMediaItem() }, list.indices.random(), 0L)
+        c.prepare()
+        c.play()
+    }
+
+    /** Turns the random order on or off; the track playing goes on. */
+    fun toggleShuffle() {
+        val c = controller ?: return
+        c.shuffleModeEnabled = !c.shuffleModeEnabled
     }
 
     /** The track waiting for the user to confirm its deletion in a system dialog. */
@@ -251,6 +274,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             isPlaying = player.isPlaying,
             durationMs = player.duration.coerceAtLeast(0L),
             repeat = Repeat.of(player.repeatMode),
+            shuffle = player.shuffleModeEnabled,
         )
     }
 

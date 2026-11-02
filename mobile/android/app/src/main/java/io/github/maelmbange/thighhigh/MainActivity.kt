@@ -144,6 +144,7 @@ class MainActivity : ComponentActivity() {
         val tracks by viewModel.tracks.collectAsStateWithLifecycle()
         val visibleTracks by viewModel.visibleTracks.collectAsStateWithLifecycle()
         val filter by viewModel.filter.collectAsStateWithLifecycle()
+        val query by viewModel.query.collectAsStateWithLifecycle()
         val genreScan by viewModel.genreScanner.progress.collectAsStateWithLifecycle()
         var filterSheetOpen by remember { mutableStateOf(false) }
         var menuOpen by remember { mutableStateOf(false) }
@@ -250,6 +251,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onClearFilter = { viewModel.filter.value = null },
+                            query = query,
+                            onQueryChange = { viewModel.query.value = it },
+                            onShufflePlay = viewModel::shufflePlay,
                         )
 
                     } else {
@@ -285,6 +289,7 @@ class MainActivity : ComponentActivity() {
                     onNext = { viewModel.next() },
                     onPrevious = { viewModel.previous() },
                     onCycleRepeat = viewModel::cycleRepeat,
+                    onToggleShuffle = viewModel::toggleShuffle,
                     onSeek = { viewModel.seekTo(it) },
                 )
             }
