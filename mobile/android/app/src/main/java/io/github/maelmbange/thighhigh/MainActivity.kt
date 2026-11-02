@@ -207,6 +207,7 @@ class MainActivity : ComponentActivity() {
                         LibraryScreen(
                             tracks = visibleTracks,
                             currentId = playback.currentId,
+                            isPlaying = playback.isPlaying,
                             filter = filter,
                             genreScan = genreScan,
                             onTrackClick = viewModel::play,

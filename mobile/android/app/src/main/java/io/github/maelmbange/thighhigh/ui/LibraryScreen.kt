@@ -1,5 +1,16 @@
 package io.github.maelmbange.thighhigh.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import kotlin.math.PI
+import kotlin.math.sin
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -53,6 +63,7 @@ import kotlin.time.Duration
 fun LibraryScreen(
     tracks: List<Track>?,
     currentId: Long?,
+    isPlaying: Boolean,
     filter: Filter?,
     genreScan: GenreScan?,
     onTrackClick: (Track) -> Unit,
@@ -69,7 +80,7 @@ fun LibraryScreen(
             )
         }
         if (genreScan != null) GenreScanBanner(genreScan)
-        Box(Modifier.fillMaxSize()) { LibraryList(tracks, currentId, onTrackClick) }
+        Box(Modifier.fillMaxSize()) { LibraryList(tracks, currentId, isPlaying, onTrackClick) }
     }
 }
 
@@ -102,6 +113,7 @@ private fun GenreScanBanner(scan: GenreScan) {
 private fun BoxScope.LibraryList(
     tracks: List<Track>?,
     currentId: Long?,
+    isPlaying: Boolean,
     onTrackClick: (Track) -> Unit,
 ) {
         when {
@@ -114,7 +126,7 @@ private fun BoxScope.LibraryList(
             )
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(tracks, key = { it.id }) { track ->
-                    TrackRow(track, playing = track.id == currentId) { onTrackClick(track) }
+                    TrackRow(track, current = track.id == currentId, animate = isPlaying) { onTrackClick(track) }
                 }
             }
         }
@@ -130,11 +142,12 @@ private object ListColors {
 }
 
 @Composable
-private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
+private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: () -> Unit) {
+    val playing = current
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = if (playing) {
-            { Icon(Icons.Default.GraphicEq, null, tint = ListColors.playing) }
+            { PlayingBars(animate, ListColors.playing) }
         } else {
             null
         },
@@ -223,4 +236,40 @@ fun PermissionScreen(onGrant: () -> Unit) {
 private fun formatDuration(d: Duration): String {
     val s = d.inWholeSeconds
     return "%d:%02d".format(s / 60, s % 60)
+}
+
+/**
+ * Four small bars for the current track. They sway gently while it plays and
+ * rest at fixed heights when it is paused or stopped.
+ */
+@Composable
+private fun PlayingBars(animate: Boolean, color: Color) {
+    val rest = floatArrayOf(0.55f, 0.85f, 0.65f, 0.4f)
+    val time = if (animate) {
+        val transition = rememberInfiniteTransition(label = "bars")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing)),
+            label = "phase",
+        ).value
+    } else {
+        null
+    }
+    Canvas(Modifier.size(24.dp)) {
+        val count = rest.size
+        val gap = size.width / (count * 3 - 1)
+        val barWidth = gap * 2
+        for (i in 0 until count) {
+            // Each bar runs at its own speed and phase so they never move in step.
+            val wave = time?.let { 0.18f * sin(it * (i % 2 + 1) + i * 1.7f) } ?: 0f
+            val h = size.height * (rest[i] + wave).coerceIn(0.2f, 1f)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(i * (barWidth + gap), size.height - h),
+                size = Size(barWidth, h),
+                cornerRadius = CornerRadius(barWidth / 2),
+            )
+        }
+    }
 }
