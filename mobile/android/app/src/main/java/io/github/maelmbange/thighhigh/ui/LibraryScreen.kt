@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -110,6 +112,7 @@ fun LibraryScreen(
     refreshing: Boolean,
     onRefresh: () -> Unit,
     onTrackClick: (Track) -> Unit,
+    onTrackLongClick: (Track) -> Unit,
     onDelete: (Track) -> Unit,
     onClearFilter: () -> Unit,
     query: String,
@@ -146,7 +149,7 @@ fun LibraryScreen(
                     .fillMaxSize()
                     .graphicsLayer { translationY = bannerHeight.toPx() * state.distanceFraction.coerceIn(0f, 1f) }
             ) {
-                LibraryList(tracks, query, currentId, isPlaying, onTrackClick, onDelete)
+                LibraryList(tracks, query, currentId, isPlaying, onTrackClick, onTrackLongClick, onDelete)
             }
         }
     }
@@ -238,6 +241,7 @@ private fun BoxScope.LibraryList(
     currentId: Long?,
     isPlaying: Boolean,
     onTrackClick: (Track) -> Unit,
+    onTrackLongClick: (Track) -> Unit,
     onDelete: (Track) -> Unit,
 ) {
         when {
@@ -251,8 +255,13 @@ private fun BoxScope.LibraryList(
             )
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(tracks, key = { it.id }) { track ->
-                    SwipeToReveal(onDelete = { onDelete(track) }) {
-                        TrackRow(track, current = track.id == currentId, animate = isPlaying) { onTrackClick(track) }
+                    SwipeToReveal(onAction = { onDelete(track) }) {
+                        TrackRow(
+                            track,
+                            current = track.id == currentId,
+                            animate = isPlaying,
+                            onLongClick = { onTrackLongClick(track) },
+                        ) { onTrackClick(track) }
                     }
                 }
             }
@@ -261,15 +270,16 @@ private fun BoxScope.LibraryList(
 
 private val ListColors = TextColors
 
+/** A track of a list; a long press opens its actions (play next, add to a playlist…). */
 @Composable
-private fun TrackRow(track: Track, current: Boolean, animate: Boolean, onClick: () -> Unit) {
+fun TrackRow(track: Track, current: Boolean, animate: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     val playing = current
     // Like the terminal app, the current track's whole row is filled with the
     // cover's main color, its text in black or white to stay readable.
     val highlight = MaterialTheme.colorScheme.primary
     val onHighlight = MaterialTheme.colorScheme.onPrimary
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
         leadingContent = if (playing) {
             { PlayingBars(animate, onHighlight) }
         } else {
@@ -475,7 +485,12 @@ private fun BoxScope.RefreshBanner(fraction: Float, refreshing: Boolean, height:
  * closes again otherwise, or once the action is used.
  */
 @Composable
-private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit) {
+fun SwipeToReveal(
+    onAction: () -> Unit,
+    icon: ImageVector = Icons.Default.Delete,
+    label: Int = R.string.delete,
+    content: @Composable () -> Unit,
+) {
     val actionWidth = 96.dp
     val openOffset = -with(LocalDensity.current) { actionWidth.toPx() }
     var offset by remember { mutableFloatStateOf(0f) }
@@ -492,7 +507,7 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
                 .background(DeleteRed)
                 .clickable {
                     scope.launch { animate(offset, 0f) { v, _ -> offset = v } }
-                    onDelete()
+                    onAction()
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -500,10 +515,10 @@ private fun SwipeToReveal(onDelete: () -> Unit, content: @Composable () -> Unit)
             // enough to hold them, so neither gets cut while the row slides.
             val revealed = with(LocalDensity.current) { (-offset).toDp() }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (revealed >= 40.dp) Icon(Icons.Default.Delete, null, tint = Color.White)
+                if (revealed >= 40.dp) Icon(icon, null, tint = Color.White)
                 if (revealed >= actionWidth - 8.dp) {
                     Text(
-                        stringResource(R.string.delete),
+                        stringResource(label),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,

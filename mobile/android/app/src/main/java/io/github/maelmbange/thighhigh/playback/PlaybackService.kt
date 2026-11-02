@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -38,6 +39,10 @@ import java.util.concurrent.Executors
  * wired or Bluetooth headsets. The queue is saved, so a headset's play button
  * starts the music again even after Android closed the app.
  */
+private val QUEUED = SessionCommand("io.github.maelmbange.thighhigh.QUEUED", Bundle.EMPTY)
+private const val ARG_INDEX = "index"
+private const val ARG_NEXT = "next"
+
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var queueStore: QueueStore
@@ -174,6 +179,7 @@ class PlaybackService : MediaSessionService() {
             val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
                 .add(REPEAT)
                 .add(SHUFFLE)
+                .add(QUEUED)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
@@ -194,6 +200,11 @@ class PlaybackService : MediaSessionService() {
                     else -> Player.REPEAT_MODE_OFF
                 }
                 SHUFFLE.customAction -> player.shuffleModeEnabled = !player.shuffleModeEnabled
+                QUEUED.customAction -> placeQueued(
+                    player as ExoPlayer,
+                    index = args.getInt(ARG_INDEX, C.INDEX_UNSET),
+                    next = args.getBoolean(ARG_NEXT),
+                )
                 else -> return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -254,8 +265,38 @@ class PlaybackService : MediaSessionService() {
 
     private val io = Executors.newSingleThreadExecutor()
 
+    /**
+     * A track just added with "play next" or "add to queue" must come right
+     * after the current one, or last, in the order actually played: with
+     * shuffle on, the player would otherwise slot it in at random.
+     */
+    @OptIn(UnstableApi::class)
+    private fun placeQueued(player: ExoPlayer, index: Int, next: Boolean) {
+        if (!player.shuffleModeEnabled || index !in 0 until player.mediaItemCount) return
+        val timeline = player.currentTimeline
+        val order = mutableListOf<Int>()
+        var i = timeline.getFirstWindowIndex(true)
+        while (i != C.INDEX_UNSET) {
+            order += i
+            i = timeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, true)
+        }
+        order.remove(index)
+        val at = if (next) order.indexOf(player.currentMediaItemIndex) + 1 else order.size
+        order.add(at.coerceIn(0, order.size), index)
+        player.setShuffleOrder(DefaultShuffleOrder(order.toIntArray(), System.nanoTime()))
+    }
+
     private companion object {
         val REPEAT = SessionCommand("io.github.maelmbange.thighhigh.REPEAT", Bundle.EMPTY)
         val SHUFFLE = SessionCommand("io.github.maelmbange.thighhigh.SHUFFLE", Bundle.EMPTY)
+    }
+
+    /** Sent by the app after adding a track to the queue; see [placeQueued]. */
+    object Queued {
+        val COMMAND = QUEUED
+        fun args(index: Int, next: Boolean) = Bundle().apply {
+            putInt(ARG_INDEX, index)
+            putBoolean(ARG_NEXT, next)
+        }
     }
 }

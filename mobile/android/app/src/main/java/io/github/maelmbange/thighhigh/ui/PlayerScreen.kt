@@ -81,6 +81,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.maelmbange.thighhigh.Cover
 import io.github.maelmbange.thighhigh.PlaybackState
+import io.github.maelmbange.thighhigh.QueueEntry
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
@@ -103,7 +105,14 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
     onSeek: (Long) -> Unit,
+    upNext: List<QueueEntry> = emptyList(),
+    onPlayQueued: (Int) -> Unit = {},
+    onRemoveQueued: (Int) -> Unit = {},
 ) {
+    var queueOpen by rememberSaveable { mutableStateOf(false) }
+    if (queueOpen) {
+        QueueSheet(upNext, onPlay = onPlayQueued, onRemove = onRemoveQueued, onDismiss = { queueOpen = false })
+    }
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
     val background = MaterialTheme.colorScheme.background
@@ -179,6 +188,9 @@ fun PlayerScreen(
             IconButton(onClick = onToggleShuffle) {
                 if (playback.shuffle) Icon(Icons.Default.ShuffleOn, stringResource(R.string.shuffle_on), tint = palette.primary)
                 else Icon(Icons.Default.Shuffle, stringResource(R.string.shuffle_off))
+            }
+            IconButton(onClick = { queueOpen = true }) {
+                Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.queue))
             }
             IconButton(onClick = { showCover = !showCover }) {
                 if (showCover) Icon(Icons.Default.GraphicEq, stringResource(R.string.show_scope))

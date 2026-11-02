@@ -54,6 +54,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maelmbange.thighhigh.ui.DownloadScreen
+import io.github.maelmbange.thighhigh.ui.PlaylistsScreen
+import io.github.maelmbange.thighhigh.ui.TrackActionsSheet
+import io.github.maelmbange.thighhigh.library.Playlist
+import io.github.maelmbange.thighhigh.library.Track
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import io.github.maelmbange.thighhigh.ui.FilterMenu
 import io.github.maelmbange.thighhigh.ui.LibraryScreen
 import io.github.maelmbange.thighhigh.ui.MiniPlayer
@@ -160,6 +165,11 @@ class MainActivity : ComponentActivity() {
         val cover by viewModel.cover.collectAsStateWithLifecycle()
         val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
         val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+        val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+        val openPlaylistId by viewModel.openPlaylistId.collectAsStateWithLifecycle()
+        val upNext by viewModel.upNext.collectAsStateWithLifecycle()
+        // The track whose actions sheet is open, and the playlist it was pressed in.
+        var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
         val current = tracks?.firstOrNull { it.id == playback.currentId }
 
         Scaffold(
@@ -169,6 +179,7 @@ class MainActivity : ComponentActivity() {
                         Text(
                             when (tab) {
                                 Tab.Library -> stringResource(R.string.app_name)
+                                Tab.Playlists -> stringResource(R.string.tab_playlists)
                                 Tab.Download -> stringResource(R.string.tab_download)
                             },
                             color = TextColors.title,
@@ -231,6 +242,16 @@ class MainActivity : ComponentActivity() {
                             label = { Text(stringResource(R.string.tab_library)) },
                         )
                         NavigationBarItem(
+                            selected = tab == Tab.Playlists,
+                            onClick = {
+                                // Tapping the tab again goes back to the list of playlists.
+                                if (tab == Tab.Playlists) viewModel.openPlaylistId.value = null
+                                viewModel.tab.value = Tab.Playlists
+                            },
+                            icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                            label = { Text(stringResource(R.string.tab_playlists)) },
+                        )
+                        NavigationBarItem(
                             selected = tab == Tab.Download,
                             onClick = { viewModel.tab.value = Tab.Download },
                             icon = { Icon(Icons.Default.Download, null) },
@@ -252,6 +273,7 @@ class MainActivity : ComponentActivity() {
                             refreshing = refreshing,
                             onRefresh = viewModel::pullRefresh,
                             onTrackClick = viewModel::play,
+                            onTrackLongClick = { actionTrack = it to null },
                             onDelete = { track ->
                                 viewModel.delete(track)?.let {
                                     deleteLauncher.launch(IntentSenderRequest.Builder(it).build())
@@ -266,6 +288,24 @@ class MainActivity : ComponentActivity() {
                     } else {
                         PermissionScreen(onGrant = { launcher.launch(REQUESTED_PERMISSIONS) })
                     }
+                    Tab.Playlists -> {
+                        BackHandler(enabled = openPlaylistId != null) { viewModel.openPlaylistId.value = null }
+                        PlaylistsScreen(
+                            playlists = playlists,
+                            library = tracks.orEmpty(),
+                            openId = openPlaylistId,
+                            currentId = playback.currentId,
+                            isPlaying = playback.isPlaying,
+                            onOpen = { viewModel.openPlaylistId.value = it },
+                            onCreate = { viewModel.createPlaylist(it) },
+                            onPlay = { p, list, track -> viewModel.playList(list, track, "playlist:${p.id}") },
+                            onShuffle = { p, list -> viewModel.shufflePlay(list, "playlist:${p.id}") },
+                            onTrackLongClick = { p, track -> actionTrack = track to p },
+                            onRemove = viewModel::removeFromPlaylist,
+                            onRename = viewModel::renamePlaylist,
+                            onDelete = viewModel::deletePlaylist,
+                        )
+                    }
                     Tab.Download -> DownloadScreen(
                         jobs = jobs,
                         onDownload = viewModel.downloader::start,
@@ -274,6 +314,20 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+
+        actionTrack?.let { (track, from) ->
+            TrackActionsSheet(
+                track = track,
+                playlists = playlists,
+                fromPlaylist = from,
+                onPlayNext = { viewModel.playNext(track) },
+                onAddToQueue = { viewModel.addToQueue(track) },
+                onAddToPlaylist = { viewModel.addToPlaylist(it, track) },
+                onCreatePlaylist = { viewModel.createPlaylist(it, with = track) },
+                onRemoveFromPlaylist = { from?.let { viewModel.removeFromPlaylist(it, track) } },
+                onDismiss = { actionTrack = null },
+            )
         }
 
         // The full-screen player slides over the tabs; minimizing it (top-left
@@ -298,6 +352,9 @@ class MainActivity : ComponentActivity() {
                     onCycleRepeat = viewModel::cycleRepeat,
                     onToggleShuffle = viewModel::toggleShuffle,
                     onSeek = { viewModel.seekTo(it) },
+                    upNext = upNext,
+                    onPlayQueued = viewModel::playQueued,
+                    onRemoveQueued = viewModel::removeQueued,
                 )
             }
         }

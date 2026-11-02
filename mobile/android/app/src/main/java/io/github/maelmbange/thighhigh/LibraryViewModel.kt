@@ -11,11 +11,13 @@ import android.util.Size
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.maelmbange.thighhigh.library.Filter
+import io.github.maelmbange.thighhigh.library.Playlist
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.library.matchesSearch
 import io.github.maelmbange.thighhigh.library.scanLibrary
@@ -36,7 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Tab { Library, Download }
+enum class Tab { Library, Playlists, Download }
 
 /** Off → whole list → current track, like the terminal app's loop key. */
 enum class Repeat(val mode: Int) {
@@ -59,6 +61,9 @@ data class PlaybackState(
     /** Next/previous follow a random order of the queue. */
     val shuffle: Boolean = false,
 )
+
+/** A track waiting in the queue, at [index] in the player's list. */
+data class QueueEntry(val index: Int, val id: Long?, val title: String, val artist: String?)
 
 /** The current track's cover and the colors taken from it. */
 data class Cover(val bitmap: Bitmap?, val palette: CoverPalette)
@@ -94,6 +99,19 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     val downloader = getApplication<ThighHighApp>().downloader
 
     val genreScanner = getApplication<ThighHighApp>().genreScanner
+
+    private val playlistStore = getApplication<ThighHighApp>().playlists
+    val playlists: StateFlow<List<Playlist>> = playlistStore.playlists
+
+    /** The playlist opened in the Playlists tab, or null for the list of playlists. */
+    val openPlaylistId = MutableStateFlow<String?>(null)
+
+    private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
+    /** What plays after the current track, in the order it will play (shuffle included). */
+    val upNext: StateFlow<List<QueueEntry>> = _upNext.asStateFlow()
+
+    /** Which list the queue was built from, so a track tapped in another list starts that list. */
+    private var queueSource: String? = null
 
     private var controller: MediaController? = null
     private val controllerFuture: ListenableFuture<MediaController> =
@@ -171,29 +189,90 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Plays [track], queueing the whole list so next/previous follow it, and opens the player. */
+    /** Plays [track] from the library list as shown, which becomes the queue. */
     fun play(track: Track) {
+        playList(visibleTracks.value ?: return, track, LIBRARY)
+    }
+
+    /**
+     * Plays [track], queueing [list] so next/previous follow it, and opens the
+     * player. Tapping the track already playing from the same list only resumes it.
+     */
+    fun playList(list: List<Track>, track: Track, source: String) {
         playerOpen.value = true
         val c = controller ?: return
-        val list = visibleTracks.value ?: return
-        if (_playback.value.currentId == track.id) {
+        if (_playback.value.currentId == track.id && queueSource == source) {
             if (!c.isPlaying) resume(c)
             return
         }
-        c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track), 0L)
+        queueSource = source
+        c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track).coerceAtLeast(0), 0L)
         c.prepare()
         c.play()
     }
 
     /** Plays the list shown in a random order, from a random track. */
-    fun shufflePlay() {
+    fun shufflePlay() = shufflePlay(visibleTracks.value.orEmpty(), LIBRARY)
+
+    /** Plays [list] in a random order, from a random track. */
+    fun shufflePlay(list: List<Track>, source: String) {
         val c = controller ?: return
-        val list = visibleTracks.value?.takeIf { it.isNotEmpty() } ?: return
+        if (list.isEmpty()) return
         playerOpen.value = true
+        queueSource = source
         c.shuffleModeEnabled = true
         c.setMediaItems(list.map { it.toMediaItem() }, list.indices.random(), 0L)
         c.prepare()
         c.play()
+    }
+
+    /** Puts [track] right after the one playing. */
+    fun playNext(track: Track) = enqueue(track, next = true)
+
+    /** Puts [track] at the end of the queue. */
+    fun addToQueue(track: Track) = enqueue(track, next = false)
+
+    private fun enqueue(track: Track, next: Boolean) {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0) {
+            // Nothing queued yet: it simply plays.
+            queueSource = null
+            c.setMediaItem(track.toMediaItem())
+            c.prepare()
+            c.play()
+            return
+        }
+        val index = if (next) c.currentMediaItemIndex + 1 else c.mediaItemCount
+        c.addMediaItem(index, track.toMediaItem())
+        c.sendCustomCommand(PlaybackService.Queued.COMMAND, PlaybackService.Queued.args(index, next))
+        // The queue no longer matches any list.
+        queueSource = null
+    }
+
+    /** Jumps to a track of the queue. */
+    fun playQueued(index: Int) {
+        val c = controller ?: return
+        c.seekTo(index, 0L)
+        resume(c)
+    }
+
+    fun removeQueued(index: Int) {
+        controller?.removeMediaItem(index)
+        queueSource = null
+    }
+
+    fun createPlaylist(name: String, with: Track? = null): Playlist =
+        playlistStore.create(name, listOfNotNull(with?.id))
+
+    fun addToPlaylist(playlist: Playlist, track: Track) = playlistStore.add(playlist.id, listOf(track.id))
+
+    fun removeFromPlaylist(playlist: Playlist, track: Track) = playlistStore.remove(playlist.id, track.id)
+
+    fun renamePlaylist(playlist: Playlist, name: String) = playlistStore.rename(playlist.id, name)
+
+    fun deletePlaylist(playlist: Playlist) {
+        if (openPlaylistId.value == playlist.id) openPlaylistId.value = null
+        playlistStore.delete(playlist.id)
     }
 
     /** Turns the random order on or off; the track playing goes on. */
@@ -291,6 +370,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun positionMs(): Long = controller?.currentPosition ?: 0L
 
     private fun syncState(player: Player) {
+        _upNext.value = upNextOf(player)
         _playback.value = PlaybackState(
             currentId = player.currentMediaItem?.mediaId?.toLongOrNull(),
             isPlaying = player.isPlaying,
@@ -298,6 +378,26 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             repeat = Repeat.of(player.repeatMode),
             shuffle = player.shuffleModeEnabled,
         )
+    }
+
+    /** The tracks after the current one, following the shuffle order when it is on. */
+    private fun upNextOf(player: Player): List<QueueEntry> {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) return emptyList()
+        val entries = mutableListOf<QueueEntry>()
+        var i = player.currentMediaItemIndex
+        while (true) {
+            i = timeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+            if (i == C.INDEX_UNSET || i >= player.mediaItemCount) break
+            val item = player.getMediaItemAt(i)
+            entries += QueueEntry(
+                index = i,
+                id = item.mediaId.toLongOrNull(),
+                title = item.mediaMetadata.title?.toString() ?: "?",
+                artist = item.mediaMetadata.artist?.toString(),
+            )
+        }
+        return entries
     }
 
     private suspend fun loadCover(id: Long?) {
@@ -313,6 +413,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             Cover(bitmap, bitmap?.let(CoverPalette::from) ?: CoverPalette.Default)
         }
         _cover.value = cover
+    }
+
+    private companion object {
+        const val LIBRARY = "library"
     }
 
     override fun onCleared() {
