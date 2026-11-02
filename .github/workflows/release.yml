@@ -63,10 +63,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner image already has the Android SDK (ANDROID_HOME) and its
+      # sdkmanager: only the NDK version the app asks for is missing.
       - name: Install the NDK
-        run: sdkmanager --install "ndk;29.0.14206865"
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "ndk;29.0.14206865"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
