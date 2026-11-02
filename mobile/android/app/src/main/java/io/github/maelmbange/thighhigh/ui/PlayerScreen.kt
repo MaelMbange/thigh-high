@@ -7,6 +7,8 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -97,11 +99,17 @@ fun PlayerScreen(
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
     val background = MaterialTheme.colorScheme.background
-    // How far the screen is pulled down by the finger. Dragging the top of the
-    // screen moves it with the finger; letting go with a downward flick (or
-    // past a third of the screen) minimizes, anything else springs back.
+    // How far the screen is pulled down by the finger. A vertical drag anywhere
+    // moves it with the finger; letting go with a downward flick (or past a
+    // third of the screen) minimizes, anything else springs back. The drag is
+    // read on the outer box, which never moves: read on the moving screen, each
+    // step would cancel the next and the screen would barely follow.
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var screenHeight by remember { mutableFloatStateOf(1f) }
+    val scope = rememberCoroutineScope()
+    // Horizontal swipe on the cover / oscilloscope: next or previous track.
+    var swipeOffset by remember { mutableFloatStateOf(0f) }
+    var visualWidth by remember { mutableFloatStateOf(1f) }
     val pullDown = Modifier.draggable(
         orientation = Orientation.Vertical,
         state = rememberDraggableState { delta -> dragOffset = (dragOffset + delta).coerceAtLeast(0f) },
@@ -118,23 +126,29 @@ fun PlayerScreen(
             }
         },
     )
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height.toFloat() }
-            .graphicsLayer { translationY = dragOffset }
             // Swallow every touch that no control takes, so taps never reach the
-            // library and tabs drawn underneath.
+            // library and tabs drawn underneath. Listed before the drag so the
+            // drag sees each touch first.
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) awaitPointerEvent().changes.forEach { it.consume() }
                 }
             }
+            .then(pullDown)
+    ) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer { translationY = dragOffset }
             .background(Brush.verticalGradient(listOf(lerp(background, palette.primary, 0.35f), background)))
             .systemBarsPadding()
             .padding(horizontal = 16.dp),
     ) {
-        Row(Modifier.fillMaxWidth().then(pullDown), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onMinimize) {
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
@@ -146,10 +160,40 @@ fun PlayerScreen(
         }
 
         Box(
-            Modifier.fillMaxWidth().weight(1f).then(pullDown),
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .onSizeChanged { visualWidth = it.width.toFloat() }
+                // Swipe left for the next track, right for the previous one.
+                // The picture follows the finger, then slides back into place.
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            val threshold = visualWidth / 4
+                            when {
+                                swipeOffset < -threshold -> onNext()
+                                swipeOffset > threshold -> onPrevious()
+                            }
+                            scope.launch { animate(swipeOffset, 0f) { v, _ -> swipeOffset = v } }
+                        },
+                        onDragCancel = {
+                            scope.launch { animate(swipeOffset, 0f) { v, _ -> swipeOffset = v } }
+                        },
+                    ) { change, dx ->
+                        change.consume()
+                        swipeOffset += dx
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
-            Crossfade(showCover, label = "visual") { coverShown ->
+            Crossfade(
+                showCover,
+                Modifier.graphicsLayer {
+                    translationX = swipeOffset
+                    alpha = 1f - (kotlin.math.abs(swipeOffset) / visualWidth).coerceIn(0f, 0.6f)
+                },
+                label = "visual",
+            ) { coverShown ->
                 if (coverShown) {
                     CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f))
                 } else {
@@ -205,6 +249,7 @@ fun PlayerScreen(
             IconButton(onClick = onStop) {
                 Icon(Icons.Default.Stop, stringResource(R.string.stop))
             }
+        }
         }
     }
 }

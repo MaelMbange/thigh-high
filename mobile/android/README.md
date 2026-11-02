@@ -11,9 +11,11 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
 - Tapping a track plays it, queues the rest of the list and opens the
   full-screen player: the cover art (top-right button switches to an
   oscilloscope of what you hear, drawn in dots like the terminal's braille scope), loop (off / list / track), previous, play/pause,
-  next, stop and a seek bar made of bars that dance with the music, the position dot riding on top of them. The top-left button (or Back), or dragging the top of the
+  next, stop and a seek bar made of bars that dance with the music, the position dot riding on top of them. The top-left button (or Back), or dragging the
   screen down, shrinks it to a bar above the tabs without stopping the music; the bar has
   play/pause and next buttons and a progress line, tap it to open the player again.
+- In the player, swiping the cover (or oscilloscope) left plays the next track, right the
+  previous one.
 - Swiping a track to the left shows a delete button; Android asks to confirm before the
   file is removed.
 - The filter button drops a menu that narrows the library to one artist, genre or album, and
