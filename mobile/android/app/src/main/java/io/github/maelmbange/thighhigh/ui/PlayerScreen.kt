@@ -247,33 +247,36 @@ fun PlayerScreen(
 
         SeekBar(playback, palette, positionMs, onSeek)
 
+        // How hard the bass hits right now, 0 to 1; the buttons swell with it.
+        val bass = rememberBassLevel()
+
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onCycleRepeat) {
+            IconButton(onClick = onCycleRepeat, Modifier.pulse(bass, 0.5f)) {
                 when (playback.repeat) {
                     Repeat.Off -> Icon(Icons.Default.Repeat, stringResource(R.string.repeat_off))
                     Repeat.All -> Icon(Icons.Default.RepeatOn, stringResource(R.string.repeat_all), tint = Catppuccin.Green)
                     Repeat.One -> Icon(Icons.Default.RepeatOneOn, stringResource(R.string.repeat_one), tint = Catppuccin.Green)
                 }
             }
-            IconButton(onClick = onPrevious, Modifier.size(56.dp)) {
+            IconButton(onClick = onPrevious, Modifier.size(56.dp).pulse(bass, 1.5f)) {
                 Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous), Modifier.size(36.dp))
             }
             FilledIconButton(
                 onClick = onTogglePlay,
-                modifier = Modifier.size(72.dp),
+                modifier = Modifier.size(72.dp).pulse(bass, 3f),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = palette.tertiary, contentColor = Color.Black),
             ) {
                 if (playback.isPlaying) Icon(Icons.Default.Pause, stringResource(R.string.pause), Modifier.size(40.dp))
                 else Icon(Icons.Default.PlayArrow, stringResource(R.string.play), Modifier.size(40.dp))
             }
-            IconButton(onClick = onNext, Modifier.size(56.dp)) {
+            IconButton(onClick = onNext, Modifier.size(56.dp).pulse(bass, 1.5f)) {
                 Icon(Icons.Default.SkipNext, stringResource(R.string.next), Modifier.size(36.dp))
             }
-            IconButton(onClick = onStop) {
+            IconButton(onClick = onStop, Modifier.pulse(bass, 0.5f)) {
                 Icon(Icons.Default.Stop, stringResource(R.string.stop))
             }
         }
@@ -428,4 +431,50 @@ private fun rememberBarLevels(): androidx.compose.runtime.State<FloatArray> {
 private fun formatMs(ms: Long): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
+}
+
+/** Each weight unit adds this much size at the strongest bass (play = 3 units). */
+private const val PULSE_PER_UNIT = 0.04f
+
+/**
+ * Grows the control with the bass: [weight] 3 for play, 1.5 for its
+ * neighbours, 0.5 for the outer buttons. Read in the draw layer, so the beat
+ * never recomposes the screen.
+ */
+private fun Modifier.pulse(bass: androidx.compose.runtime.State<Float>, weight: Float) = graphicsLayer {
+    val scale = 1f + PULSE_PER_UNIT * weight * bass.value
+    scaleX = scale
+    scaleY = scale
+}
+
+/**
+ * The bass level of what is playing, 0 to 1: the sound is low-passed around
+ * 150 Hz, its loudness compared with the recent peak so quiet and loud tracks
+ * both move, rising at once and falling back smoothly.
+ */
+@Composable
+private fun rememberBassLevel(): androidx.compose.runtime.State<Float> {
+    val level = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val window = FloatArray(1024)
+        var peak = 0.05f
+        var smoothed = 0f
+        // One-pole low-pass at ~150 Hz for 48 kHz audio.
+        val alpha = 0.02f
+        while (true) withFrameNanos {
+            val playing = AudioTap.waveform(window)
+            var y = 0f
+            var energy = 0f
+            for (x in window) {
+                y += alpha * (x - y)
+                energy += y * y
+            }
+            val rms = if (playing) sqrt(energy / window.size) else 0f
+            peak = max(rms, peak * 0.995f).coerceAtLeast(0.02f)
+            val target = (rms / peak).coerceIn(0f, 1f).let { it * it }
+            smoothed = if (target > smoothed) target else smoothed * 0.85f + target * 0.15f
+            level.floatValue = smoothed
+        }
+    }
+    return level
 }
