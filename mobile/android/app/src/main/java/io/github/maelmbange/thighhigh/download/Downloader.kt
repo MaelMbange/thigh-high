@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.provider.MediaStore
+import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
@@ -12,6 +13,7 @@ import io.github.maelmbange.thighhigh.library.MUSIC_RELATIVE_PATH
 import java.io.File
 import java.util.UUID
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,8 @@ private val AUDIO_EXTENSIONS = mapOf(
     "wav" to "audio/wav",
 )
 
+private const val TAG = "Downloader"
+
 // Prefixes on yt-dlp's printed lines so they can be told apart.
 private const val TITLE = "[t]"
 private const val FILE = "[f]"
@@ -64,7 +68,12 @@ private const val FILE = "[f]"
  */
 class Downloader(context: Context) {
     private val app = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // A failure must end up on the job's card, never crash the app.
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+            Log.e(TAG, "download coroutine failed", e)
+        }
+    )
     private val slots = Semaphore(2)
 
     private val _jobs = MutableStateFlow<List<DownloadJob>>(emptyList())
@@ -92,8 +101,9 @@ class Downloader(context: Context) {
         scope.launch {
             try {
                 ready.await()
-            } catch (e: Exception) {
-                set(job.id) { it.copy(status = DownloadStatus.Failed, error = "yt-dlp n'a pas pu démarrer : ${e.message}") }
+            } catch (e: Throwable) {
+                Log.e(TAG, "yt-dlp init failed", e)
+                set(job.id) { it.copy(status = DownloadStatus.Failed, error = "yt-dlp n'a pas pu démarrer : ${e.message ?: e.javaClass.simpleName}") }
                 return@launch
             }
             slots.withPermit { run(job) }
@@ -121,7 +131,8 @@ class Downloader(context: Context) {
             _added.tryEmit(Unit)
         } catch (_: YoutubeDL.CanceledException) {
             set(job.id) { it.copy(status = DownloadStatus.Canceled) }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            Log.e(TAG, "download failed", e)
             if (current(job.id)?.status != DownloadStatus.Canceled) {
                 set(job.id) { it.copy(status = DownloadStatus.Failed, error = errorMessage(e)) }
             }
@@ -164,10 +175,13 @@ class Downloader(context: Context) {
         }
         var path: String? = null
         YoutubeDL.getInstance().execute(request, job.id) { progress, _, line ->
-            when {
-                line.startsWith(TITLE) -> set(job.id) { it.copy(title = line.removePrefix(TITLE).trim()) }
-                line.startsWith(FILE) -> path = line.removePrefix(FILE).trim()
-                progress > 0f -> set(job.id) { it.copy(percent = progress) }
+            // Runs on the library's reader thread: an exception here would kill the app.
+            runCatching {
+                when {
+                    line.startsWith(TITLE) -> set(job.id) { it.copy(title = line.removePrefix(TITLE).trim()) }
+                    line.startsWith(FILE) -> path = line.removePrefix(FILE).trim()
+                    progress > 0f -> set(job.id) { it.copy(percent = progress) }
+                }
             }
         }
         val file = path?.let(::File)
@@ -217,7 +231,7 @@ class Downloader(context: Context) {
     }
 }
 
-private fun errorMessage(e: Exception): String {
+private fun errorMessage(e: Throwable): String {
     val text = e.message.orEmpty()
     val last = text.lines().lastOrNull { it.startsWith("ERROR:") }?.removePrefix("ERROR:")?.trim()
     return when {
