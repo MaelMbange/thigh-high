@@ -6,7 +6,7 @@ The Android app: Kotlin, Jetpack Compose and Media3 (ExoPlayer). Android 10 or l
 
 - Lists the tracks in the phone's `Music/thigh-high` folder (the same folder
   name as the terminal app), newest first. Each title is drawn in its cover's
-  main color, artist and genre in the second color.
+  main color, the artist in the second and the genre in the third.
 - A bottom bar switches between the library and the download screen.
 - Tapping a track plays it, queues the rest of the list and opens the
   full-screen player: the cover art (top-right button switches to an

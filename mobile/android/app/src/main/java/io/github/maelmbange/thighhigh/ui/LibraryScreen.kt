@@ -37,7 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,8 +123,8 @@ private fun BoxScope.LibraryList(
 }
 
 /**
- * Each track wears its cover's colors: the title in the main color, artist
- * and genre in the second one. Tracks without a cover keep the theme's colors.
+ * Each track wears its cover's colors: the title in the main color, the
+ * artist in the second and the genre in the third. Tracks without a cover keep the theme's colors.
  */
 @Composable
 private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
@@ -146,8 +149,18 @@ private fun TrackRow(track: Track, playing: Boolean, onClick: () -> Unit) {
             )
         },
         supportingContent = {
+            // Artist in the cover's second color, genre in its third.
+            val artist = track.artist ?: stringResource(R.string.unknown_artist)
             Text(
-                listOfNotNull(track.artist ?: stringResource(R.string.unknown_artist), track.genre).joinToString(" · "),
+                buildAnnotatedString {
+                    append(artist)
+                    if (track.genre != null) {
+                        append(" · ")
+                        withStyle(SpanStyle(color = palette?.tertiary ?: MaterialTheme.colorScheme.primary)) {
+                            append(track.genre)
+                        }
+                    }
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

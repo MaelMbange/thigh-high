@@ -16,13 +16,24 @@ import io.github.maelmbange.thighhigh.playback.AudioTap
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * The waveform being heard, drawn like the terminal app's scope: the line is
  * plotted on a grid of small dots (the terminal uses braille characters,
- * 2 × 4 dots each), from the secondary color near silence to the tertiary at
- * its peaks. Quiet tracks are scaled up to stay visible.
+ * 2 × 4 dots each), going from the cover's second color near silence through
+ * its main color to the third at the peaks. Quiet tracks are scaled up to stay visible.
  */
+/**
+ * Three clear steps instead of a muddy blend: the second color near silence,
+ * the main color in between, the third at the peaks.
+ */
+private fun traceColor(palette: CoverPalette, loudness: Float): androidx.compose.ui.graphics.Color {
+    val t = sqrt(loudness.coerceIn(0f, 1f)) // lift the quiet parts so all three colors show
+    return if (t < 0.5f) lerp(palette.secondary, palette.primary, t * 2f)
+    else lerp(palette.primary, palette.tertiary, (t - 0.5f) * 2f)
+}
+
 /** Samples on screen (~8 ms at 44.1 kHz): few enough that each wave is wide. */
 private const val SHOWN = 352
 
@@ -88,7 +99,14 @@ fun Oscilloscope(palette: CoverPalette, modifier: Modifier = Modifier) {
             }
         }
 
-        val radius = 0.95.dp.toPx()
+        // Thicker trace: every lit dot also lights the one below it, and dots are large.
+        for (k in lit.indices.reversed()) {
+            if (lit[k] && k + cols < lit.size && !lit[k + cols]) {
+                lit[k + cols] = true
+                loud[k + cols] = loud[k]
+            }
+        }
+        val radius = 1.35.dp.toPx()
         for (r in 0 until rows) {
             for (c in 0 until cols) {
                 val k = r * cols + c
@@ -96,7 +114,7 @@ fun Oscilloscope(palette: CoverPalette, modifier: Modifier = Modifier) {
                 // Each pair of dot columns is one braille cell, with a small gap after it.
                 val x = c * dotX + (c / 2) * cellGap + radius
                 val y = r * dotY + dotY / 2
-                drawCircle(lerp(palette.secondary, palette.tertiary, loud[k]), radius, Offset(x, y))
+                drawCircle(traceColor(palette, loud[k]), radius, Offset(x, y))
             }
         }
     }
