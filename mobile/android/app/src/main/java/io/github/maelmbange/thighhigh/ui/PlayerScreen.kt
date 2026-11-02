@@ -130,14 +130,10 @@ fun PlayerScreen(
         Modifier
             .fillMaxSize()
             .onSizeChanged { screenHeight = it.height.toFloat() }
-            // Swallow every touch that no control takes, so taps never reach the
-            // library and tabs drawn underneath. Listed before the drag so the
-            // drag sees each touch first.
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
-                }
-            }
+            // The drag covers the whole screen, which also keeps taps from
+            // reaching the library and tabs drawn underneath. Nothing here may
+            // consume touches: gestures still under their touch slop (a slow
+            // drag) give up as soon as anything else consumes the movement.
             .then(pullDown)
     ) {
     Column(

@@ -66,6 +66,16 @@ The APK is `app/build/outputs/apk/release/app-release.apk`. It is signed with
 the debug key for now, so it installs directly (allow installs from unknown
 sources); a real signing key comes with the GitHub Releases milestone.
 
+The player's touch gestures (drag down, swipe the cover, taps beside the
+buttons) are checked on the JVM with Robolectric:
+
+```
+./gradlew testDebugUnitTest
+```
+
+Robolectric downloads its Android jars from Maven Central the first time; set
+`ROBOLECTRIC_REPO` to a mirror's URL if Central is unreachable.
+
 ## Layout
 
 - `library/`: reads the track list from Android's MediaStore.

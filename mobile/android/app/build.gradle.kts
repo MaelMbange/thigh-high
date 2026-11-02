@@ -9,6 +9,14 @@ val repoRoot: File = rootDir.resolve("../..").canonicalFile
 val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
 
 android {
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        // Robolectric downloads its Android jars from Maven Central; a mirror can
+        // be set with ROBOLECTRIC_REPO when Central is unreachable.
+        unitTests.all { test ->
+            System.getenv("ROBOLECTRIC_REPO")?.let { test.systemProperty("robolectric.dependency.repo.url", it) }
+        }
+    }
     namespace = "io.github.maelmbange.thighhigh"
     compileSdk = 36
     // Used to cross-compile the Rust core; Android Studio installs it if missing.
@@ -102,6 +110,13 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // Gesture tests of the Compose screens, run on the JVM with Robolectric.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.junit)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
