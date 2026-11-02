@@ -44,6 +44,11 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material3.InputChipDefaults
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -125,15 +130,31 @@ fun LibraryScreen(
     onQueryChange: (String) -> Unit,
     onShufflePlay: () -> Unit,
 ) {
+    // Kept so the chip can fold away still showing the filter it removed.
+    var lastFilter by remember { mutableStateOf(filter) }
+    if (filter != null) lastFilter = filter
     Column(Modifier.fillMaxSize()) {
         SearchBar(query, onQueryChange)
         ListHeader(count = tracks?.size, onShufflePlay = onShufflePlay)
-        if (filter != null) {
+        // The filter in use, under the search bar; × removes it.
+        AnimatedVisibility(
+            visible = filter != null,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            val shown = filter ?: lastFilter ?: return@AnimatedVisibility
             InputChip(
                 selected = true,
                 onClick = onClearFilter,
-                label = { Text("${filter.field.label()} : ${filterValueLabel(filter.value)}") },
+                label = { Text("${shown.field.label()} : ${filterValueLabel(shown.value)}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingIcon = { Icon(shown.field.icon, null, Modifier.size(18.dp)) },
                 trailingIcon = { Icon(Icons.Default.Close, stringResource(R.string.filter_clear), Modifier.size(18.dp)) },
+                colors = InputChipDefaults.inputChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                    selectedLabelColor = TextColors.title,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTrailingIconColor = TextColors.title,
+                ),
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }

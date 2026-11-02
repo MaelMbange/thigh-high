@@ -74,7 +74,9 @@ import io.github.maelmbange.thighhigh.ui.TrackActionsSheet
 import io.github.maelmbange.thighhigh.library.Playlist
 import io.github.maelmbange.thighhigh.library.Track
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import io.github.maelmbange.thighhigh.ui.FilterMenu
+import io.github.maelmbange.thighhigh.ui.FilterSheet
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import io.github.maelmbange.thighhigh.ui.LibraryScreen
 import io.github.maelmbange.thighhigh.ui.MiniPlayer
 import io.github.maelmbange.thighhigh.ui.PermissionScreen
@@ -206,20 +208,11 @@ class MainActivity : ComponentActivity() {
                     },
                     actions = {
                         if (tab == Tab.Library && granted) {
-                            Box {
-                                IconButton(onClick = { filterSheetOpen = true }) {
+                            // A dot on the button while a filter is on.
+                            IconButton(onClick = { filterSheetOpen = true }) {
+                                BadgedBox(badge = { if (filter != null) Badge(containerColor = MaterialTheme.colorScheme.primary) }) {
                                     Icon(Icons.Default.FilterList, stringResource(R.string.filter))
                                 }
-                                FilterMenu(
-                                    expanded = filterSheetOpen,
-                                    tracks = tracks.orEmpty(),
-                                    current = filter,
-                                    onPick = {
-                                        viewModel.filter.value = it
-                                        filterSheetOpen = false
-                                    },
-                                    onDismiss = { filterSheetOpen = false },
-                                )
                             }
                             Box {
                                 IconButton(onClick = { menuOpen = true }) {
@@ -353,6 +346,15 @@ class MainActivity : ComponentActivity() {
                 }
               }
             }
+        }
+
+        if (filterSheetOpen) {
+            FilterSheet(
+                tracks = tracks.orEmpty(),
+                current = filter,
+                onPick = { viewModel.filter.value = it },
+                onDismiss = { filterSheetOpen = false },
+            )
         }
 
         actionTrack?.let { (track, from) ->

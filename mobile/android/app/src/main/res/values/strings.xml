@@ -42,6 +42,11 @@
     <string name="filter_album">Album</string>
     <string name="filter_unknown">Inconnu</string>
     <string name="filter_clear">Retirer le filtre</string>
+    <string name="filter_show_all">Tout afficher</string>
+    <string name="filter_search">Rechercher un %1$s…</string>
+    <string name="filter_order_name">A–Z</string>
+    <string name="filter_order_count">Plus de morceaux</string>
+    <string name="filter_no_match">Aucun résultat.</string>
     <string name="more">Plus d\'options</string>
     <string name="detect_genres">Détecter les genres manquants</string>
     <string name="genre_scan_running">Détection des genres : %1$d / %2$d</string>
