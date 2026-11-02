@@ -37,13 +37,25 @@ android {
         }
     }
 
+    // Release key, given by environment variables (GitHub Actions secrets in
+    // .github/workflows/release.yml). Without them the release APK is signed
+    // with the local debug key, as before.
+    val releaseKeystore = System.getenv("THIGH_HIGH_KEYSTORE")?.takeIf { it.isNotBlank() }
+    val releaseSigning = releaseKeystore?.let {
+        signingConfigs.create("release") {
+            storeFile = file(it)
+            storePassword = System.getenv("THIGH_HIGH_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("THIGH_HIGH_KEY_ALIAS")
+            keyPassword = System.getenv("THIGH_HIGH_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // No release key yet: sign with the debug key so the APK installs.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = releaseSigning ?: signingConfigs.getByName("debug")
         }
     }
 

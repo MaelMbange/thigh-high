@@ -56,6 +56,11 @@ Android app.
 
 ## Install and run
 
+Ready-made builds are on the
+[Releases page](https://github.com/MaelMbange/thigh-high/releases): the Android
+APK, and the terminal app for Windows, Linux and macOS (Apple Silicon). The
+sections below build from source instead.
+
 ### Terminal app
 
 You need a recent stable [Rust toolchain](https://rustup.rs) (edition 2024,
@@ -99,6 +104,27 @@ The APK is `mobile/android/app/build/outputs/apk/release/app-release.apk`. It
 only contains 64-bit ARM libraries, which covers every recent phone, and is
 signed with your local debug key: allow installs from unknown sources, or use
 `adb install -r`.
+
+To sign with another key, set `THIGH_HIGH_KEYSTORE` (path to the keystore),
+`THIGH_HIGH_KEYSTORE_PASSWORD`, `THIGH_HIGH_KEY_ALIAS` and
+`THIGH_HIGH_KEY_PASSWORD` before building. An APK signed with a different key
+than the installed one cannot update it: uninstall the app first.
+
+### Publishing a release
+
+The [Release workflow](.github/workflows/release.yml) builds the signed APK
+and the terminal app for each platform and publishes them as a GitHub release
+when a version tag is pushed. Set the same version in `versionName` (and bump
+`versionCode`) in `mobile/android/app/build.gradle.kts` and in the workspace
+`Cargo.toml`, commit, then:
+
+```
+git tag v0.8.1
+git push origin v0.8.1
+```
+
+The signing key comes from the repository secrets `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
 
 ## Terminal keys
 

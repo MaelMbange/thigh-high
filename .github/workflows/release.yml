@@ -1,0 +1,211 @@
+# Builds the Android APK and the terminal app, then publishes them as a GitHub
+# release. Runs when a version tag is pushed:
+#
+#   git tag v0.8.1 && git push origin v0.8.1
+#
+# The tag must match versionName in mobile/android/app/build.gradle.kts and the
+# workspace version in Cargo.toml. "Run workflow" in the Actions tab builds
+# everything without publishing, to check that the build and the secrets work.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_BASE64    the signing keystore, base64-encoded
+#   ANDROID_KEYSTORE_PASSWORD  its password
+#   ANDROID_KEY_ALIAS          the key's alias in it
+#   ANDROID_KEY_PASSWORD       the key's password
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          android=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' mobile/android/app/build.gradle.kts)
+          cargo=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          echo "Android: $android, Cargo: $cargo"
+          if [ "$android" != "$cargo" ]; then
+            echo "::error::versionName ($android) and the Cargo workspace version ($cargo) differ"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$android" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $android"
+            exit 1
+          fi
+          echo "version=$android" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android APK
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: sdkmanager --install "ndk;29.0.14206865"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is missing: the APK would be signed with a throwaway key and could not update the installed app."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "THIGH_HIGH_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        working-directory: mobile/android
+        env:
+          THIGH_HIGH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          THIGH_HIGH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          THIGH_HIGH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Check the signature
+        run: |
+          apk=mobile/android/app/build/outputs/apk/release/app-release.apk
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk"
+          mkdir -p dist
+          cp "$apk" "dist/thigh-high-$VERSION-android-arm64.apk"
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*
+          if-no-files-found: error
+
+  terminal:
+    name: Terminal app (${{ matrix.name }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: linux-x86_64
+            # Oldest supported runner: the binary then runs on older glibc too.
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked -p thigh-high --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          name="thigh-high-$VERSION-${{ matrix.name }}"
+          mkdir -p "dist/$name"
+          cp README.md LICENSE "dist/$name/"
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "../target/${{ matrix.target }}/release/thigh-high.exe" "$name/"
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            cp "../target/${{ matrix.target }}/release/thigh-high" "$name/"
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          rm -r "$name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: [version, android, terminal]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Create the release
+        run: |
+          sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "thigh-high $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes \
+            --verify-tag
