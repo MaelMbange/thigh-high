@@ -107,7 +107,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         val c = controller ?: return
         val list = _tracks.value ?: return
         if (_playback.value.currentId == track.id) {
-            if (!c.isPlaying) c.play()
+            if (!c.isPlaying) resume(c)
             return
         }
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track), 0L)
@@ -117,14 +117,24 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlayPause() {
         val c = controller ?: return
-        if (c.isPlaying) c.pause() else c.play()
+        if (c.isPlaying) c.pause() else resume(c)
     }
 
-    /** Pauses and goes back to the start of the track. */
+    /**
+     * Stops at once and goes back to the start of the track. A real stop
+     * (not pause + seek) drops the audio already buffered, which a seek
+     * while paused would otherwise play for a split second.
+     */
     fun stop() {
         val c = controller ?: return
-        c.pause()
+        c.stop()
         c.seekTo(0L)
+    }
+
+    /** After [stop] the player is idle and must be prepared again. */
+    private fun resume(c: Player) {
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        c.play()
     }
 
     fun next() = controller?.seekToNext()
