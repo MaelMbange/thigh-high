@@ -45,6 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,6 +65,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        hideNavigationBar()
         if (savedInstanceState == null) handleShare(intent)
         setContent {
             ThighHighTheme {
@@ -69,6 +73,23 @@ class MainActivity : ComponentActivity() {
                     App(viewModel)
                 }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Dialogs and other apps can bring the bar back; hide it again on return.
+        if (hasFocus) hideNavigationBar()
+    }
+
+    /**
+     * Hides the phone's navigation bar. A swipe up from the bottom edge shows it
+     * for a moment, then it hides again by itself.
+     */
+    private fun hideNavigationBar() {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.navigationBars())
         }
     }
 

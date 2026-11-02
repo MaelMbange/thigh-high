@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -127,7 +128,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         _refreshing.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val started = System.currentTimeMillis()
                 _tracks.value = scanLibrary(getApplication())
+                // A scan can end within a frame; keep the banner up long enough
+                // to be seen and for the gesture to settle back.
+                delay((700 - (System.currentTimeMillis() - started)).coerceAtLeast(0))
             } finally {
                 _refreshing.value = false
             }

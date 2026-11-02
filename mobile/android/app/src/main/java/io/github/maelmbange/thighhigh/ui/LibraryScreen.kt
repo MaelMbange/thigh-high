@@ -24,6 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
 import kotlinx.coroutines.delay
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,8 +98,24 @@ fun LibraryScreen(
         }
         if (genreScan != null) GenreScanBanner(genreScan)
         // Pull the list down to rescan the music folder.
-        PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
-            LibraryList(tracks, currentId, isPlaying, onTrackClick)
+        // Pull the list down to rescan the music folder: a faded banner slides
+        // in above the list instead of the usual spinning icon.
+        val state = rememberPullToRefreshState()
+        val bannerHeight = 36.dp
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+            state = state,
+            indicator = { RefreshBanner(state.distanceFraction, refreshing, bannerHeight) },
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { translationY = bannerHeight.toPx() * state.distanceFraction.coerceIn(0f, 1f) }
+            ) {
+                LibraryList(tracks, currentId, isPlaying, onTrackClick)
+            }
         }
     }
 }
@@ -326,5 +345,33 @@ private fun MiniProgress(durationMs: Long, positionMs: () -> Long) {
     val fraction = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     Box(Modifier.fillMaxWidth().height(3.dp).background(ListColors.duration.copy(alpha = 0.35f))) {
         Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(ListColors.playing))
+    }
+}
+
+/** The banner shown while the list is pulled down or rescanning. */
+@Composable
+private fun BoxScope.RefreshBanner(fraction: Float, refreshing: Boolean, height: Dp) {
+    val shown = fraction.coerceIn(0f, 1f)
+    if (shown <= 0f) return
+    Box(
+        Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .height(height * shown)
+            .background(ListColors.playing.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            stringResource(
+                when {
+                    refreshing -> R.string.refresh_running
+                    fraction >= 1f -> R.string.refresh_release
+                    else -> R.string.refresh_pull
+                }
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = ListColors.title.copy(alpha = 0.8f * shown),
+            maxLines = 1,
+        )
     }
 }

@@ -7,6 +7,9 @@
     <string name="play">Lecture</string>
     <string name="pause">Pause</string>
     <string name="refresh">Actualiser</string>
+    <string name="refresh_pull">Tirez pour actualiser</string>
+    <string name="refresh_release">Relâchez pour actualiser</string>
+    <string name="refresh_running">Actualisation…</string>
     <string name="unknown_artist">Artiste inconnu</string>
 
     <string name="tab_library">Bibliothèque</string>
