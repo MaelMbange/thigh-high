@@ -75,6 +75,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -144,6 +147,9 @@ fun PlayerScreen(
     onRetryLyrics: () -> Unit = {},
     /** What the buttons and the cover swell with. */
     pulseSource: PulseSource = PulseSource.Bass,
+    /** Whether the track is in the favorites; the heart in the top bar switches it. */
+    favorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {},
 ) {
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
@@ -323,6 +329,7 @@ fun PlayerScreen(
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
             Box(Modifier.weight(1f))
+            FavoriteButton(favorite, palette.primary, onToggleFavorite)
             IconButton(onClick = { showCover = !showCover }) {
                 if (showCover) Icon(Icons.Default.Lyrics, stringResource(R.string.show_lyrics))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
@@ -834,4 +841,24 @@ private fun rememberBassLevel(source: PulseSource): BassTrail {
         }
     }
     return level
+}
+
+/** The heart of the top bar: filled when the track is a favorite, with a little bounce when it changes. */
+@Composable
+private fun FavoriteButton(favorite: Boolean, color: Color, onToggle: () -> Unit) {
+    val bounce = remember { androidx.compose.animation.core.Animatable(1f) }
+    var first by remember { mutableStateOf(true) }
+    LaunchedEffect(favorite) {
+        if (first) { first = false; return@LaunchedEffect }
+        bounce.snapTo(if (favorite) 1.35f else 0.8f)
+        bounce.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMedium))
+    }
+    IconButton(onClick = onToggle) {
+        Icon(
+            if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            stringResource(if (favorite) R.string.favorite_remove else R.string.favorite_add),
+            Modifier.graphicsLayer { scaleX = bounce.value; scaleY = bounce.value },
+            tint = if (favorite) color else LocalContentColor.current,
+        )
+    }
 }

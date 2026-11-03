@@ -50,6 +50,8 @@ fun HomeScreen(
     libraryCount: Int?,
     recent: List<Track>,
     playlists: List<Playlist>,
+    /** Ids of the tracks still on the phone, for the playlist covers. */
+    inLibrary: Set<Long> = emptySet(),
     currentId: Long?,
     isPlaying: Boolean,
     onOpenFavorites: () -> Unit,
@@ -115,6 +117,7 @@ fun HomeScreen(
             PlaylistRow(
                 playlist,
                 Modifier.animateItem(),
+                coverIds = playlist.trackIds.filter { it in inLibrary },
                 onClick = { onOpenPlaylist(playlist) },
                 onLongClick = { deleting = playlist },
             )

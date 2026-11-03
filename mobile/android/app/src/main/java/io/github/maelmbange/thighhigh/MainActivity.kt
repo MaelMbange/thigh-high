@@ -358,6 +358,7 @@ class MainActivity : ComponentActivity() {
                           libraryCount = tracks?.size,
                           recent = recent,
                           playlists = playlists,
+                          inLibrary = remember(tracks) { tracks.orEmpty().mapTo(HashSet()) { it.id } },
                           currentId = playback.currentId,
                           isPlaying = playback.isPlaying,
                           onOpenFavorites = { viewModel.homeView.value = HomeView.Favorites },
@@ -526,6 +527,8 @@ class MainActivity : ComponentActivity() {
                     onLyricsShown = { viewModel.lyricsShown.value = it },
                     onRetryLyrics = viewModel::retryLyrics,
                     pulseSource = pulseSource,
+                    favorite = track.id in favorites.trackIds,
+                    onToggleFavorite = { viewModel.toggleFavorite(track) },
                 )
             }
         }

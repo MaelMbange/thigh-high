@@ -7,7 +7,17 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -90,7 +100,7 @@ fun PlaylistsScreen(
         label = "playlist",
     ) { playlist ->
         if (playlist == null) {
-            PlaylistList(playlists, onOpen = { onOpen(it.id) }, onCreate = onCreate, onDelete = onDelete)
+            PlaylistGrid(playlists, library, onOpen = { onOpen(it.id) }, onCreate = onCreate, onDelete = onDelete)
         } else {
             PlaylistDetail(
                 playlist,
@@ -111,40 +121,77 @@ fun PlaylistsScreen(
     }
 }
 
+/**
+ * The playlists as a grid of covers, two by row (a trial: the list it
+ * replaced may come back), led by a tile that creates one.
+ */
 @Composable
-private fun PlaylistList(
+private fun PlaylistGrid(
     playlists: List<Playlist>,
+    library: List<Track>,
     onOpen: (Playlist) -> Unit,
     onCreate: (String) -> Unit,
     onDelete: (Playlist) -> Unit,
 ) {
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
-    LazyColumn(Modifier.fillMaxSize()) {
-        item {
-            ListItem(
-                modifier = Modifier.clickable { naming = true },
-                leadingContent = {
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Add, null, tint = TextColors.playing)
-                    }
-                },
-                headlineContent = { Text(stringResource(R.string.playlist_new), color = TextColors.playing, fontWeight = FontWeight.SemiBold) },
-            )
+    val inLibrary = remember(library) { library.mapTo(HashSet()) { it.id } }
+    LazyVerticalGrid(
+        GridCells.Fixed(2),
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item(key = "new") {
+            Column(
+                Modifier.clickable { naming = true },
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(2.dp, TextColors.playing.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Add, null, Modifier.size(40.dp), tint = TextColors.playing)
+                }
+                Text(
+                    stringResource(R.string.playlist_new),
+                    color = TextColors.playing,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         items(playlists, key = { it.id }) { playlist ->
-            PlaylistRow(
-                playlist,
-                Modifier.animateItem(),
-                onClick = { onOpen(playlist) },
-                onLongClick = { deleting = playlist },
-            )
+            BoxWithConstraints(Modifier.animateItem()) {
+                val side = maxWidth
+                Column(
+                    Modifier
+                        .combinedClickable(onClick = { onOpen(playlist) }, onLongClick = { deleting = playlist }),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    PlaylistCover(playlist.trackIds.filter { it in inLibrary }, side, corner = 16.dp)
+                    Column {
+                        Text(playlist.name, color = TextColors.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            pluralStringResource(R.plurals.track_count, playlist.trackIds.size, playlist.trackIds.size),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextColors.info,
+                        )
+                    }
+                }
+            }
         }
         if (playlists.isEmpty()) {
-            item {
+            item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     stringResource(R.string.playlists_empty),
-                    Modifier.fillMaxWidth().padding(32.dp),
+                    Modifier.fillMaxWidth().padding(16.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextColors.info,
@@ -178,10 +225,17 @@ private fun PlaylistList(
 
 /** A playlist in a list: a tap opens it, a long press offers to delete it. */
 @Composable
-fun PlaylistRow(playlist: Playlist, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun PlaylistRow(
+    playlist: Playlist,
+    modifier: Modifier = Modifier,
+    /** The tracks shown on its cover: those still in the library. */
+    coverIds: List<Long> = playlist.trackIds,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     ListItem(
         modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        leadingContent = { PlaylistIcon() },
+        leadingContent = { PlaylistCover(coverIds, 48.dp, corner = 10.dp) },
         headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(pluralStringResource(R.plurals.track_count, playlist.trackIds.size, playlist.trackIds.size))
@@ -212,7 +266,7 @@ fun PlaylistDetail(
     title: String = playlist.name,
     editable: Boolean = true,
     empty: String = stringResource(R.string.playlist_empty),
-    icon: @Composable () -> Unit = { PlaylistIcon(56) },
+    icon: @Composable () -> Unit = { PlaylistCover(tracks.map { it.id }, 56.dp, corner = 10.dp) },
 ) {
     var menu by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
