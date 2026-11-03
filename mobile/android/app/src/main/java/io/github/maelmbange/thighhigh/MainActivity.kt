@@ -49,6 +49,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.unit.IntOffset
 import io.github.maelmbange.thighhigh.ui.HomeScreen
+import io.github.maelmbange.thighhigh.ui.NavBar
+import io.github.maelmbange.thighhigh.ui.NavItem
 import io.github.maelmbange.thighhigh.ui.PlaylistDetail
 import io.github.maelmbange.thighhigh.ui.FavoritesIcon
 import androidx.compose.material3.DropdownMenu
@@ -57,8 +59,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -292,34 +292,25 @@ class MainActivity : ComponentActivity() {
                             onTogglePlay = viewModel::togglePlayPause,
                         )
                     }
-                    NavigationBar {
-                        NavigationBarItem(
-                            selected = tab == Tab.Library,
-                            onClick = {
-                                // Tapping the tab again goes back to the home panel.
-                                if (tab == Tab.Library) viewModel.homeView.value = HomeView.Home
-                                viewModel.tab.value = Tab.Library
-                            },
-                            icon = { Icon(Icons.Default.Home, null) },
-                            label = { Text(stringResource(R.string.tab_library)) },
-                        )
-                        NavigationBarItem(
-                            selected = tab == Tab.Playlists,
-                            onClick = {
-                                // Tapping the tab again goes back to the list of playlists.
-                                if (tab == Tab.Playlists) viewModel.openPlaylistId.value = null
-                                viewModel.tab.value = Tab.Playlists
-                            },
-                            icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
-                            label = { Text(stringResource(R.string.tab_playlists)) },
-                        )
-                        NavigationBarItem(
-                            selected = tab == Tab.Download,
-                            onClick = { viewModel.tab.value = Tab.Download },
-                            icon = { Icon(Icons.Default.Download, null) },
-                            label = { Text(stringResource(R.string.tab_download)) },
-                        )
-                    }
+                    NavBar(
+                        items = listOf(
+                            NavItem(Icons.Default.Home, stringResource(R.string.tab_library)),
+                            NavItem(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.tab_playlists)),
+                            NavItem(Icons.Default.Download, stringResource(R.string.tab_download)),
+                        ),
+                        position = { pagerState.currentPage + pagerState.currentPageOffsetFraction },
+                        onSelect = { i ->
+                            val picked = Tab.entries[i]
+                            // Tapping the tab shown again goes back to its start:
+                            // the home panel, or the list of playlists.
+                            if (picked == tab) when (picked) {
+                                Tab.Library -> viewModel.homeView.value = HomeView.Home
+                                Tab.Playlists -> viewModel.openPlaylistId.value = null
+                                Tab.Download -> Unit
+                            }
+                            viewModel.tab.value = picked
+                        },
+                    )
                 }
             },
         ) { padding ->
