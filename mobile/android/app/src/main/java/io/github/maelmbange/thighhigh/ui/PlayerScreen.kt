@@ -91,6 +91,8 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.playback.AudioTap
+import io.github.maelmbange.thighhigh.playback.PulseDetector
+import io.github.maelmbange.thighhigh.playback.PulseSource
 import kotlin.math.abs
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.snap
@@ -140,6 +142,8 @@ fun PlayerScreen(
     lyrics: LyricsState = LyricsState.Loading,
     onLyricsShown: (Boolean) -> Unit = {},
     onRetryLyrics: () -> Unit = {},
+    /** What the buttons and the cover swell with. */
+    pulseSource: PulseSource = PulseSource.Bass,
 ) {
     val palette = cover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
@@ -326,7 +330,7 @@ fun PlayerScreen(
         }
 
         // How hard the bass hits right now, 0 to 1; the buttons and the cover swell with it.
-        val bass = rememberBassLevel()
+        val bass = rememberBassLevel(pulseSource)
 
         Box(
             Modifier
@@ -815,32 +819,18 @@ private fun Modifier.pulse(bass: BassTrail, weight: Float, delayMs: Long = 0L) =
 }
 
 /**
- * The bass level of what is playing, 0 to 1: the sound is low-passed around
- * 150 Hz, its loudness compared with the recent peak so quiet and loud tracks
- * both move, rising at once and falling back smoothly.
+ * How hard [source] hits in what is playing, 0 to 1, every frame (the
+ * instrument picked in the settings; the bass by default).
  */
 @Composable
-private fun rememberBassLevel(): BassTrail {
+private fun rememberBassLevel(source: PulseSource): BassTrail {
     val level = remember { BassTrail() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(source) {
         val window = FloatArray(1024)
-        var peak = 0.05f
-        var smoothed = 0f
-        // One-pole low-pass at ~150 Hz for 48 kHz audio.
-        val alpha = 0.02f
+        val detector = PulseDetector(source)
         while (true) withFrameNanos {
             val playing = AudioTap.waveform(window)
-            var y = 0f
-            var energy = 0f
-            for (x in window) {
-                y += alpha * (x - y)
-                energy += y * y
-            }
-            val rms = if (playing) sqrt(energy / window.size) else 0f
-            peak = max(rms, peak * 0.995f).coerceAtLeast(0.02f)
-            val target = (rms / peak).coerceIn(0f, 1f).let { it * it }
-            smoothed = if (target > smoothed) target else smoothed * 0.85f + target * 0.15f
-            level.push(System.nanoTime(), smoothed)
+            level.push(System.nanoTime(), detector.level(window, playing, AudioTap.rate))
         }
     }
     return level

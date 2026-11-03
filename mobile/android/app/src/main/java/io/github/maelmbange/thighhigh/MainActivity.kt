@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Settings
+import io.github.maelmbange.thighhigh.ui.SettingsSheet
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.DropdownMenu
@@ -203,6 +205,8 @@ class MainActivity : ComponentActivity() {
         val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
         val neighbors by viewModel.neighbors.collectAsStateWithLifecycle()
         // The track whose actions sheet is open, and the playlist it was pressed in.
+        var settingsOpen by remember { mutableStateOf(false) }
+        val pulseSource by viewModel.pulseSource.collectAsStateWithLifecycle()
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
         val current = tracks?.firstOrNull { it.id == playback.currentId }
         // Kept so the mini player can fold away with its last track shown.
@@ -223,6 +227,9 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     actions = {
+                        IconButton(onClick = { settingsOpen = true }) {
+                            Icon(Icons.Default.Settings, stringResource(R.string.settings))
+                        }
                         if (tab == Tab.Library && granted) {
                             // A dot on the button while a filter is on.
                             IconButton(onClick = { filterSheetOpen = true }) {
@@ -370,6 +377,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        if (settingsOpen) {
+            SettingsSheet(
+                pulseSource = pulseSource,
+                onPulseSource = viewModel::setPulseSource,
+                onDismiss = { settingsOpen = false },
+            )
+        }
+
         if (filterSheetOpen) {
             FilterSheet(
                 tracks = tracks.orEmpty(),
@@ -428,6 +443,7 @@ class MainActivity : ComponentActivity() {
                     lyrics = lyrics,
                     onLyricsShown = { viewModel.lyricsShown.value = it },
                     onRetryLyrics = viewModel::retryLyrics,
+                    pulseSource = pulseSource,
                 )
             }
         }

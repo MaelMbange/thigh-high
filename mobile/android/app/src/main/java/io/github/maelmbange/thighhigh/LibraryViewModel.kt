@@ -1,5 +1,6 @@
 package io.github.maelmbange.thighhigh
 
+import io.github.maelmbange.thighhigh.playback.PulseSource
 import io.github.maelmbange.thighhigh.download.DownloadJob
 import android.app.Application
 import android.content.ComponentName
@@ -98,6 +99,9 @@ sealed interface LyricsState {
 /** How long the queue shown stays as expected after a removal, before the player's state is read again. */
 private const val QUEUE_SETTLE_MS = 700L
 
+/** Settings key: the instrument the player's pulse follows. */
+private const val PULSE_SOURCE = "pulse_source"
+
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _tracks = MutableStateFlow<List<Track>?>(null)
     /** `null` until the first scan finishes. */
@@ -125,6 +129,19 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Whether the full-screen player is shown over the tabs. */
     val playerOpen = MutableStateFlow(false)
+
+    private val settings = app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+
+    private val _pulseSource = MutableStateFlow(
+        PulseSource.entries.firstOrNull { it.name == settings.getString(PULSE_SOURCE, null) } ?: PulseSource.Bass
+    )
+    /** What the player's buttons and cover swell with (Settings). */
+    val pulseSource: StateFlow<PulseSource> = _pulseSource.asStateFlow()
+
+    fun setPulseSource(source: PulseSource) {
+        _pulseSource.value = source
+        settings.edit().putString(PULSE_SOURCE, source.name).apply()
+    }
 
     val downloader = getApplication<ThighHighApp>().downloader
 

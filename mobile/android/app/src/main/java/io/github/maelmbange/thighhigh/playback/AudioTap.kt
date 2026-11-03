@@ -36,7 +36,11 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
 
     private var written = 0L
     private var lastWriteNanos = 0L
+    @Volatile
     private var sampleRate = 44_100
+
+    /** The rate of the audio being heard, for filters tuned in Hz. */
+    val rate: Int get() = sampleRate
     private var channels = 2
     private var encoding = C.ENCODING_PCM_16BIT
 
