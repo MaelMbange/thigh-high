@@ -36,9 +36,17 @@ class PulseDetector(private val source: PulseSource) {
 
     fun level(window: FloatArray, playing: Boolean, sampleRate: Int): Float {
         if (!playing) {
+            // The reference peak eases down too, so playback resumes at full swing.
+            peak = (peak * 0.995f).coerceAtLeast(MIN_PEAK)
             smoothed *= 0.85f
             return smoothed
         }
+        // Each frame's window is the latest audio, overlapping the previous
+        // one: the filters start over on it rather than carry on from where
+        // the last window ended, which would filter the same sound twice.
+        low = window.firstOrNull() ?: 0f
+        high = low
+        lastSample = low
         val target = when (source) {
             PulseSource.Bass -> normalize(rms(window) { x -> lowPass(x, 150f, sampleRate) })
             PulseSource.Voice -> normalize(rms(window) { x -> bandPass(x, 300f, 3_000f, sampleRate) })

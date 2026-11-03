@@ -204,9 +204,9 @@ class MainActivity : ComponentActivity() {
         val history by viewModel.history.collectAsStateWithLifecycle()
         val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
         val neighbors by viewModel.neighbors.collectAsStateWithLifecycle()
-        // The track whose actions sheet is open, and the playlist it was pressed in.
         var settingsOpen by remember { mutableStateOf(false) }
         val pulseSource by viewModel.pulseSource.collectAsStateWithLifecycle()
+        // The track whose actions sheet is open, and the playlist it was pressed in.
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
         val current = tracks?.firstOrNull { it.id == playback.currentId }
         // Kept so the mini player can fold away with its last track shown.
