@@ -550,7 +550,7 @@ private const val MODE_IGNORED = 3
 @Composable
 private fun UpNextBanner(modifier: Modifier, onClick: () -> Unit) {
     Box(
-        modifier
+        Modifier
             // Room between the controls and the strip.
             .padding(top = 20.dp)
             // Edge to edge: out past the screen's side padding.
@@ -560,6 +560,8 @@ private fun UpNextBanner(modifier: Modifier, onClick: () -> Unit) {
                 val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
                 layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
             }
+            // The caller's fade applies to the full width, not to the narrower slot.
+            .then(modifier)
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(
                 Brush.verticalGradient(
