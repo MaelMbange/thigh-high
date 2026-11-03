@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** The id of the favorites, kept as a playlist that is never listed with the others. */
+const val FAVORITES_ID = "favorites"
+
 /** A named list of tracks, by MediaStore id, in the order they were added. */
 data class Playlist(val id: String, val name: String, val trackIds: List<Long>) {
     /** The playlist's tracks still in the library (deleted ones are skipped). */
@@ -55,8 +58,11 @@ class PlaylistStore(context: Context) {
         }
     }
 
-    private fun edit(id: String, change: (Playlist) -> Playlist) =
-        change { list -> list.map { if (it.id == id) change(it) else it } }
+    private fun edit(id: String, change: (Playlist) -> Playlist) = change { list ->
+        // The favorites come into being with their first track.
+        val all = if (id == FAVORITES_ID && list.none { it.id == id }) list + Playlist(id, "", emptyList()) else list
+        all.map { if (it.id == id) change(it) else it }
+    }
 
     private fun change(transform: (List<Playlist>) -> List<Playlist>) {
         _playlists.update(transform)

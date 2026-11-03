@@ -19,7 +19,10 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import io.github.maelmbange.thighhigh.library.FAVORITES_ID
 import io.github.maelmbange.thighhigh.library.Filter
+import io.github.maelmbange.thighhigh.library.ListeningStore
+import io.github.maelmbange.thighhigh.library.byLastPlayed
 import io.github.maelmbange.thighhigh.library.Playlist
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.library.matchesSearch
@@ -46,6 +49,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class Tab { Library, Playlists, Download }
+
+/** What the first tab shows: the home panel, every track, or the favorites. */
+enum class HomeView { Home, All, Favorites }
+
+/** How many recently played tracks the home screen lists. */
+const val RECENT_SHOWN = 5
 
 /** Off → whole list → current track, like the terminal app's loop key. */
 enum class Repeat(val mode: Int) {
@@ -148,7 +157,33 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     val genreScanner = getApplication<ThighHighApp>().genreScanner
 
     private val playlistStore = getApplication<ThighHighApp>().playlists
-    val playlists: StateFlow<List<Playlist>> = playlistStore.playlists
+
+    private val listening = ListeningStore(app)
+
+    /** The playlists (favorites aside), the last played first. */
+    val playlists: StateFlow<List<Playlist>> = combine(playlistStore.playlists, listening.playlistPlayed) { list, played ->
+        list.filterNot { it.id == FAVORITES_ID }.byLastPlayed(played)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        playlistStore.playlists.value.filterNot { it.id == FAVORITES_ID }.byLastPlayed(listening.playlistPlayed.value),
+    )
+
+    private fun favoritesOf(list: List<Playlist>) =
+        list.firstOrNull { it.id == FAVORITES_ID } ?: Playlist(FAVORITES_ID, "", emptyList())
+
+    /** The favorite tracks, kept as a playlist of their own. */
+    val favorites: StateFlow<Playlist> = playlistStore.playlists.map(::favoritesOf)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, favoritesOf(playlistStore.playlists.value))
+
+    /** The last tracks played, most recent first, as many as the home screen shows. */
+    val recent: StateFlow<List<Track>> = combine(listening.recent, _tracks) { ids, tracks ->
+        val byId = tracks.orEmpty().associateBy { it.id }
+        ids.mapNotNull(byId::get).take(RECENT_SHOWN)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** What the first tab shows. */
+    val homeView = MutableStateFlow(HomeView.Home)
 
     /** The playlist opened in the Playlists tab, or null for the list of playlists. */
     val openPlaylistId = MutableStateFlow<String?>(null)
@@ -207,6 +242,12 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { genreScanner.changed.collect { refresh() } }
         viewModelScope.launch {
             playback.map { it.currentId }.distinctUntilChanged().collect { loadCover(it) }
+        }
+        // A track counts as listened to once it actually plays.
+        viewModelScope.launch {
+            playback.map { it.currentId to it.isPlaying }.distinctUntilChanged().collect { (id, playing) ->
+                if (id != null && playing && listening.recent.value.firstOrNull() != id) listening.played(id)
+            }
         }
         viewModelScope.launch {
             val current = combine(playback.map { it.currentId }.distinctUntilChanged(), _tracks) { id, tracks ->
@@ -305,6 +346,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         queueSource = source
+        markPlaylistPlayed(source)
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track).coerceAtLeast(0), 0L)
         c.prepare()
         c.play()
@@ -319,6 +361,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         if (list.isEmpty()) return
         playerOpen.value = true
         queueSource = source
+        markPlaylistPlayed(source)
         c.shuffleModeEnabled = true
         c.setMediaItems(list.map { it.toMediaItem() }, list.indices.random(), 0L)
         c.prepare()
@@ -382,10 +425,27 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Set while the queue shown waits for a removal to settle: see [removeQueued]. */
     private var queueFrozen: kotlinx.coroutines.Job? = null
 
+    /** A playlist started from [source] moves to the top of the list. */
+    private fun markPlaylistPlayed(source: String) {
+        source.removePrefix(PLAYLIST).takeIf { it != source }?.let { listening.playlistPlayed(it) }
+    }
+
+    /** A new playlist is listed first, as if just played. */
     fun createPlaylist(name: String, with: Track? = null): Playlist =
-        playlistStore.create(name, listOfNotNull(with?.id))
+        playlistStore.create(name, listOfNotNull(with?.id)).also { listening.playlistPlayed(it.id) }
 
     fun addToPlaylist(playlist: Playlist, track: Track) = playlistStore.add(playlist.id, listOf(track.id))
+
+    /** Adds the tracks picked from inside the playlist, at its end. */
+    fun addTracks(playlist: Playlist, trackIds: List<Long>) = playlistStore.add(playlist.id, trackIds)
+
+    fun isFavorite(track: Track) = track.id in favorites.value.trackIds
+
+    /** Adds [track] to the favorites, or takes it out. */
+    fun toggleFavorite(track: Track) {
+        if (isFavorite(track)) playlistStore.remove(FAVORITES_ID, track.id)
+        else playlistStore.add(FAVORITES_ID, listOf(track.id))
+    }
 
     fun removeFromPlaylist(playlist: Playlist, track: Track) = playlistStore.remove(playlist.id, track.id)
 
@@ -393,7 +453,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deletePlaylist(playlist: Playlist) {
         if (openPlaylistId.value == playlist.id) openPlaylistId.value = null
+        // Only the list goes: its tracks stay on the phone and in the library.
         playlistStore.delete(playlist.id)
+        listening.forgetPlaylist(playlist.id)
     }
 
     /** Turns the random order on or off; the track playing goes on. */
@@ -614,6 +676,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val LIBRARY = "library"
+        /** Source of a queue built from a playlist, followed by its id. */
+        const val PLAYLIST = "playlist:"
     }
 
     override fun onCleared() {

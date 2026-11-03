@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +26,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -36,7 +36,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +69,7 @@ fun PlaylistsScreen(
     onRemove: (Playlist, Track) -> Unit,
     onRename: (Playlist, String) -> Unit,
     onDelete: (Playlist) -> Unit,
+    onAddTracks: (Playlist, List<Long>) -> Unit,
 ) {
     val open = playlists.firstOrNull { it.id == openId }
     // Opening a playlist slides it in from the right; going back slides it out.
@@ -90,11 +90,12 @@ fun PlaylistsScreen(
         label = "playlist",
     ) { playlist ->
         if (playlist == null) {
-            PlaylistList(playlists, onOpen = { onOpen(it.id) }, onCreate = onCreate)
+            PlaylistList(playlists, onOpen = { onOpen(it.id) }, onCreate = onCreate, onDelete = onDelete)
         } else {
             PlaylistDetail(
                 playlist,
                 tracks = remember(playlist, library) { playlist.tracks(library) },
+                library = library,
                 currentId = currentId,
                 isPlaying = isPlaying,
                 onBack = { onOpen(null) },
@@ -104,14 +105,21 @@ fun PlaylistsScreen(
                 onRemove = { onRemove(playlist, it) },
                 onRename = { onRename(playlist, it) },
                 onDelete = { onDelete(playlist) },
+                onAddTracks = { onAddTracks(playlist, it) },
             )
         }
     }
 }
 
 @Composable
-private fun PlaylistList(playlists: List<Playlist>, onOpen: (Playlist) -> Unit, onCreate: (String) -> Unit) {
+private fun PlaylistList(
+    playlists: List<Playlist>,
+    onOpen: (Playlist) -> Unit,
+    onCreate: (String) -> Unit,
+    onDelete: (Playlist) -> Unit,
+) {
     var naming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<Playlist?>(null) }
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             ListItem(
@@ -125,14 +133,11 @@ private fun PlaylistList(playlists: List<Playlist>, onOpen: (Playlist) -> Unit, 
             )
         }
         items(playlists, key = { it.id }) { playlist ->
-            ListItem(
-                modifier = Modifier.clickable { onOpen(playlist) }.animateItem(),
-                leadingContent = { PlaylistIcon() },
-                headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                supportingContent = {
-                    Text(pluralStringResource(R.plurals.track_count, playlist.trackIds.size, playlist.trackIds.size))
-                },
-                colors = ListItemDefaults.colors(headlineColor = TextColors.title, supportingColor = TextColors.info),
+            PlaylistRow(
+                playlist,
+                Modifier.animateItem(),
+                onClick = { onOpen(playlist) },
+                onLongClick = { deleting = playlist },
             )
         }
         if (playlists.isEmpty()) {
@@ -159,12 +164,41 @@ private fun PlaylistList(playlists: List<Playlist>, onOpen: (Playlist) -> Unit, 
             onDismiss = { naming = false },
         )
     }
+    deleting?.let { playlist ->
+        DeletePlaylistDialog(
+            playlist,
+            onConfirm = {
+                deleting = null
+                onDelete(playlist)
+            },
+            onDismiss = { deleting = null },
+        )
+    }
 }
 
+/** A playlist in a list: a tap opens it, a long press offers to delete it. */
 @Composable
-private fun PlaylistDetail(
+fun PlaylistRow(playlist: Playlist, modifier: Modifier = Modifier, onClick: () -> Unit, onLongClick: () -> Unit) {
+    ListItem(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        leadingContent = { PlaylistIcon() },
+        headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            Text(pluralStringResource(R.plurals.track_count, playlist.trackIds.size, playlist.trackIds.size))
+        },
+        colors = ListItemDefaults.colors(headlineColor = TextColors.title, supportingColor = TextColors.info),
+    )
+}
+
+/**
+ * One playlist's tracks. The favorites use it too, with their own [title],
+ * and without renaming or deleting ([editable] false).
+ */
+@Composable
+fun PlaylistDetail(
     playlist: Playlist,
     tracks: List<Track>,
+    library: List<Track>,
     currentId: Long?,
     isPlaying: Boolean,
     onBack: () -> Unit,
@@ -174,17 +208,23 @@ private fun PlaylistDetail(
     onRemove: (Track) -> Unit,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
+    onAddTracks: (List<Long>) -> Unit,
+    title: String = playlist.name,
+    editable: Boolean = true,
+    empty: String = stringResource(R.string.playlist_empty),
+    icon: @Composable () -> Unit = { PlaylistIcon(56) },
 ) {
     var menu by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
-            PlaylistIcon(56)
+            icon()
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(
-                    playlist.name,
+                    title,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = TextColors.title,
@@ -197,7 +237,7 @@ private fun PlaylistDetail(
                     color = TextColors.info,
                 )
             }
-            Box {
+            if (editable) Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.more)) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, onClick = { menu = false; renaming = true })
@@ -221,16 +261,31 @@ private fun PlaylistDetail(
                 Text(stringResource(R.string.shuffle_play), Modifier.padding(start = 6.dp))
             }
         }
-        if (tracks.isEmpty()) {
-            Text(
-                stringResource(R.string.playlist_empty),
-                Modifier.fillMaxWidth().padding(32.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextColors.info,
-            )
-        }
         LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                ListItem(
+                    modifier = Modifier.clickable { picking = true },
+                    leadingContent = {
+                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Add, null, tint = TextColors.playing)
+                        }
+                    },
+                    headlineContent = {
+                        Text(stringResource(R.string.playlist_add_tracks), color = TextColors.playing, fontWeight = FontWeight.SemiBold)
+                    },
+                )
+            }
+            if (tracks.isEmpty()) {
+                item {
+                    Text(
+                        empty,
+                        Modifier.fillMaxWidth().padding(32.dp),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextColors.info,
+                    )
+                }
+            }
             items(tracks, key = { it.id }) { track ->
                 Box(Modifier.animateItem()) {
                     SwipeToReveal(
@@ -262,14 +317,21 @@ private fun PlaylistDetail(
         )
     }
     if (deleting) {
-        AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text(stringResource(R.string.playlist_delete)) },
-            text = { Text(stringResource(R.string.playlist_delete_confirm, playlist.name)) },
-            confirmButton = {
-                TextButton(onClick = { deleting = false; onDelete() }) { Text(stringResource(R.string.delete), color = DeleteRed) }
+        DeletePlaylistDialog(
+            playlist,
+            onConfirm = { deleting = false; onDelete() },
+            onDismiss = { deleting = false },
+        )
+    }
+    if (picking) {
+        TrackPickerSheet(
+            library = library,
+            already = remember(playlist) { playlist.trackIds.toSet() },
+            onAdd = {
+                picking = false
+                onAddTracks(it)
             },
-            dismissButton = { TextButton(onClick = { deleting = false }) { Text(stringResource(R.string.cancel)) } },
+            onDismiss = { picking = false },
         )
     }
 }

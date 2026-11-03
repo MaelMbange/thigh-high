@@ -29,4 +29,20 @@ class PlaylistStoreTest {
         val playlist = Playlist("x", "x", listOf(5L, 9L, 1L))
         assertEquals(listOf(5L, 1L), playlist.tracks(listOf(t(1), t(5))).map { it.id })
     }
+
+    @Test fun favoritesAppearWithTheirFirstTrack() {
+        val store = PlaylistStore(context)
+        store.add(FAVORITES_ID, listOf(4L))
+        store.add(FAVORITES_ID, listOf(7L, 4L))
+        store.remove(FAVORITES_ID, 4L)
+        assertEquals(listOf(7L), PlaylistStore(context).playlists.value.single { it.id == FAVORITES_ID }.trackIds)
+    }
+
+    @Test fun deletingAPlaylistLeavesTheOthers() {
+        val store = PlaylistStore(context)
+        val a = store.create("A", listOf(1L))
+        val b = store.create("B", listOf(1L))
+        store.delete(a.id)
+        assertEquals(listOf(b), PlaylistStore(context).playlists.value)
+    }
 }

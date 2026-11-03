@@ -12,7 +12,18 @@
     <string name="refresh_running">Actualisation…</string>
     <string name="unknown_artist">Artiste inconnu</string>
 
-    <string name="tab_library">Bibliothèque</string>
+    <string name="tab_library">Accueil</string>
+    <string name="favorites">Favoris</string>
+    <string name="home_all">Tout</string>
+    <string name="home_all_title">Tous les morceaux</string>
+    <string name="home_recent">Écoutés récemment</string>
+    <string name="home_recent_empty">Les morceaux que tu écoutes apparaîtront ici.</string>
+    <string name="home_playlists_empty">Aucune playlist pour l\'instant. Crée-en une avec « Nouvelle ».</string>
+    <string name="favorite_add">Ajouter aux favoris</string>
+    <string name="favorite_remove">Retirer des favoris</string>
+    <string name="favorite_added">Ajouté aux favoris</string>
+    <string name="favorite_removed">Retiré des favoris</string>
+    <string name="favorites_empty">Aucun favori pour l\'instant. Touche « Ajouter des morceaux », ou fais un appui long sur un morceau puis « Ajouter aux favoris ».</string>
     <string name="tab_download">Télécharger</string>
 
     <string name="download">Télécharger</string>
@@ -102,8 +113,16 @@
     <string name="playlist_new">Nouvelle playlist</string>
     <string name="playlist_name">Nom</string>
     <string name="playlist_delete">Supprimer la playlist</string>
-    <string name="playlist_delete_confirm">Supprimer « %1$s » ? Les morceaux restent dans la bibliothèque.</string>
-    <string name="playlist_empty">Playlist vide. Appui long sur un morceau de la bibliothèque pour l\'ajouter ici.</string>
+    <string name="playlist_delete_title">Supprimer « %1$s » ?</string>
+    <string name="playlist_delete_really">Vraiment supprimer ?</string>
+    <string name="playlist_delete_really_text">« %1$s » et son contenu seront perdus pour de bon. Les morceaux, eux, ne sont pas supprimés de l\'app.</string>
+    <string name="playlist_delete_forever">Supprimer définitivement</string>
+    <string name="go_on">Continuer</string>
+    <string name="playlist_new_short">Nouvelle</string>
+    <string name="playlist_add_tracks">Ajouter des morceaux</string>
+    <string name="picker_add">Ajouter</string>
+    <string name="picker_add_count">Ajouter (%1$d)</string>
+    <string name="playlist_empty">Playlist vide. Touche « Ajouter des morceaux » pour en choisir.</string>
     <string name="playlists_empty">Aucune playlist pour l\'instant. Crée-en une ici, ou fais un appui long sur un morceau de la bibliothèque.</string>
     <string name="create">Créer</string>
     <string name="save">Enregistrer</string>
@@ -130,6 +149,10 @@
     <plurals name="track_count">
         <item quantity="one">%1$d morceau</item>
         <item quantity="other">%1$d morceaux</item>
+    </plurals>
+    <plurals name="playlist_delete_confirm">
+        <item quantity="one">La playlist et son contenu (%1$d morceau) seront perdus. Les morceaux restent dans l\'app.</item>
+        <item quantity="other">La playlist, le choix de ses %1$d morceaux et leur ordre seront perdus. Les morceaux restent dans l\'app.</item>
     </plurals>
     <plurals name="genre_scan_done">
         <item quantity="one">Genres détectés : %1$d sur %2$d morceau</item>

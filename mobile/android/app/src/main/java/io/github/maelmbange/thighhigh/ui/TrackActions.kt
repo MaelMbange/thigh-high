@@ -25,6 +25,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,6 +75,8 @@ fun TrackActionsSheet(
     track: Track,
     playlists: List<Playlist>,
     fromPlaylist: Playlist?,
+    favorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (Playlist) -> Unit,
@@ -129,6 +133,14 @@ fun TrackActionsSheet(
                         ActionRow(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.add_to_queue)) {
                             onAddToQueue()
                             done(queued)
+                        }
+                        val favoriteDone = stringResource(if (favorite) R.string.favorite_removed else R.string.favorite_added)
+                        ActionRow(
+                            if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            stringResource(if (favorite) R.string.favorite_remove else R.string.favorite_add),
+                        ) {
+                            onToggleFavorite()
+                            done(favoriteDone)
                         }
                         ActionRow(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.add_to_playlist)) {
                             picking = true

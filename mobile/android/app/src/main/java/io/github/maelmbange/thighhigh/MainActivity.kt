@@ -45,7 +45,12 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Settings
 import io.github.maelmbange.thighhigh.ui.SettingsSheet
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.unit.IntOffset
+import io.github.maelmbange.thighhigh.ui.HomeScreen
+import io.github.maelmbange.thighhigh.ui.PlaylistDetail
+import io.github.maelmbange.thighhigh.ui.FavoritesIcon
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -199,6 +204,9 @@ class MainActivity : ComponentActivity() {
         val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
         val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
         val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+        val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+        val recent by viewModel.recent.collectAsStateWithLifecycle()
+        val homeView by viewModel.homeView.collectAsStateWithLifecycle()
         val openPlaylistId by viewModel.openPlaylistId.collectAsStateWithLifecycle()
         val upNext by viewModel.upNext.collectAsStateWithLifecycle()
         val history by viewModel.history.collectAsStateWithLifecycle()
@@ -219,18 +227,27 @@ class MainActivity : ComponentActivity() {
                     title = {
                         Text(
                             when (tab) {
-                                Tab.Library -> stringResource(R.string.app_name)
+                                Tab.Library -> stringResource(
+                                    if (homeView == HomeView.All) R.string.home_all_title else R.string.app_name
+                                )
                                 Tab.Playlists -> stringResource(R.string.tab_playlists)
                                 Tab.Download -> stringResource(R.string.tab_download)
                             },
                             color = TextColors.title,
                         )
                     },
+                    navigationIcon = {
+                        if (tab == Tab.Library && homeView == HomeView.All) {
+                            IconButton(onClick = { viewModel.homeView.value = HomeView.Home }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                            }
+                        }
+                    },
                     actions = {
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Default.Settings, stringResource(R.string.settings))
                         }
-                        if (tab == Tab.Library && granted) {
+                        if (tab == Tab.Library && homeView == HomeView.All && granted) {
                             // A dot on the button while a filter is on.
                             IconButton(onClick = { filterSheetOpen = true }) {
                                 BadgedBox(badge = { if (filter != null) Badge(containerColor = MaterialTheme.colorScheme.primary) }) {
@@ -278,8 +295,12 @@ class MainActivity : ComponentActivity() {
                     NavigationBar {
                         NavigationBarItem(
                             selected = tab == Tab.Library,
-                            onClick = { viewModel.tab.value = Tab.Library },
-                            icon = { Icon(Icons.Default.LibraryMusic, null) },
+                            onClick = {
+                                // Tapping the tab again goes back to the home panel.
+                                if (tab == Tab.Library) viewModel.homeView.value = HomeView.Home
+                                viewModel.tab.value = Tab.Library
+                            },
+                            icon = { Icon(Icons.Default.Home, null) },
                             label = { Text(stringResource(R.string.tab_library)) },
                         )
                         NavigationBarItem(
@@ -313,7 +334,63 @@ class MainActivity : ComponentActivity() {
               Box(Modifier.fillMaxSize()) {
                 when (tab) {
                     Tab.Library -> if (granted) {
-                        LibraryScreen(
+                      BackHandler(enabled = homeView != HomeView.Home && pagerState.currentPage == Tab.Library.ordinal) {
+                          viewModel.homeView.value = HomeView.Home
+                      }
+                      AnimatedContent(
+                          homeView,
+                          transitionSpec = {
+                              val forward = targetState != HomeView.Home
+                              val spec = tween<IntOffset>(320)
+                              if (forward) {
+                                  (slideInHorizontally(spec) { it } + fadeIn(tween(220))) togetherWith
+                                      (slideOutHorizontally(spec) { -it / 4 } + fadeOut(tween(220)))
+                              } else {
+                                  (slideInHorizontally(spec) { -it / 4 } + fadeIn(tween(220))) togetherWith
+                                      (slideOutHorizontally(spec) { it } + fadeOut(tween(220)))
+                              }
+                          },
+                          label = "home",
+                      ) { view ->
+                      when (view) {
+                      HomeView.Home -> HomeScreen(
+                          favoritesCount = remember(favorites, tracks) { favorites.tracks(tracks.orEmpty()).size },
+                          libraryCount = tracks?.size,
+                          recent = recent,
+                          playlists = playlists,
+                          currentId = playback.currentId,
+                          isPlaying = playback.isPlaying,
+                          onOpenFavorites = { viewModel.homeView.value = HomeView.Favorites },
+                          onOpenAll = { viewModel.homeView.value = HomeView.All },
+                          onPlayRecent = { viewModel.playList(recent, it, "recent") },
+                          onTrackLongClick = { actionTrack = it to null },
+                          onOpenPlaylist = {
+                              viewModel.openPlaylistId.value = it.id
+                              viewModel.tab.value = Tab.Playlists
+                          },
+                          onCreatePlaylist = { viewModel.createPlaylist(it) },
+                          onDeletePlaylist = viewModel::deletePlaylist,
+                      )
+                      HomeView.Favorites -> PlaylistDetail(
+                          favorites,
+                          tracks = remember(favorites, tracks) { favorites.tracks(tracks.orEmpty()) },
+                          library = tracks.orEmpty(),
+                          currentId = playback.currentId,
+                          isPlaying = playback.isPlaying,
+                          onBack = { viewModel.homeView.value = HomeView.Home },
+                          onPlay = { list, track -> viewModel.playList(list, track, "playlist:${favorites.id}") },
+                          onShuffle = { viewModel.shufflePlay(it, "playlist:${favorites.id}") },
+                          onTrackLongClick = { actionTrack = it to null },
+                          onRemove = { viewModel.removeFromPlaylist(favorites, it) },
+                          onRename = {},
+                          onDelete = {},
+                          onAddTracks = { viewModel.addTracks(favorites, it) },
+                          title = stringResource(R.string.favorites),
+                          editable = false,
+                          empty = stringResource(R.string.favorites_empty),
+                          icon = { FavoritesIcon() },
+                      )
+                      HomeView.All -> LibraryScreen(
                             tracks = visibleTracks,
                             currentId = playback.currentId,
                             isPlaying = playback.isPlaying,
@@ -333,6 +410,8 @@ class MainActivity : ComponentActivity() {
                             onQueryChange = { viewModel.query.value = it },
                             onShufflePlay = viewModel::shufflePlay,
                         )
+                      }
+                      }
 
                     } else {
                         PermissionScreen(onGrant = { launcher.launch(REQUESTED_PERMISSIONS) })
@@ -355,6 +434,7 @@ class MainActivity : ComponentActivity() {
                             onRemove = viewModel::removeFromPlaylist,
                             onRename = viewModel::renamePlaylist,
                             onDelete = viewModel::deletePlaylist,
+                            onAddTracks = viewModel::addTracks,
                         )
                     }
                     Tab.Download -> DownloadScreen(
@@ -399,6 +479,8 @@ class MainActivity : ComponentActivity() {
                 track = track,
                 playlists = playlists,
                 fromPlaylist = from,
+                favorite = track.id in favorites.trackIds,
+                onToggleFavorite = { viewModel.toggleFavorite(track) },
                 onPlayNext = { viewModel.playNext(track) },
                 onAddToQueue = { viewModel.addToQueue(track) },
                 onAddToPlaylist = { viewModel.addToPlaylist(it, track) },
