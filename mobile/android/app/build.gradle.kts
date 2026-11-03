@@ -27,8 +27,8 @@ android {
         // Android 10+: MediaStore exposes RELATIVE_PATH, used to find Music/thigh-high.
         minSdk = 29
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.8.1"
+        versionCode = 15
+        versionName = "0.8.2"
 
         ndk {
             // yt-dlp ships Python and ffmpeg per CPU type (~30 MB each): keep

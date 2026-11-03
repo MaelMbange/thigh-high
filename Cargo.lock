@@ -2760,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "thigh-high"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "color-eyre",
  "dirs",
@@ -2775,7 +2775,7 @@ dependencies = [
 
 [[package]]
 name = "thigh-high-android"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "jni 0.21.1",
  "thigh-high-core",
@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "thigh-high-core"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "eyre",
  "image",
