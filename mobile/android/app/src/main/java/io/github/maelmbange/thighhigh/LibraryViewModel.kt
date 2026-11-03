@@ -572,13 +572,36 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         c.play()
     }
 
-    fun next() = controller?.seekToNext()
+    fun next() = controller?.let { it.seekToNext(); expectTrack(it) }
 
     /** Back to the start of the track, or the previous one in its first seconds. */
-    fun previous() = controller?.seekToPrevious()
+    fun previous() = controller?.let { it.seekToPrevious(); expectTrack(it) }
 
     /** Always the previous track (a swipe), never the start of this one. */
-    fun skipPrevious() = controller?.seekToPreviousMediaItem()
+    fun skipPrevious() = controller?.let { it.seekToPreviousMediaItem(); expectTrack(it) }
+
+    /** The track a skip just moved to, held while the service catches up: see [expectTrack]. */
+    private var expectedId: Long? = null
+    private var expectedUntil = 0L
+    private var expectedCheck: kotlinx.coroutines.Job? = null
+
+    /**
+     * Right after a skip, the controller already shows the new track, but the
+     * service can still report the one before for a moment: the player then
+     * flashed the old cover, title and colors. For a short while, a state
+     * naming another track is taken as stale and skipped; the player's state
+     * is read again once that time is over.
+     */
+    private fun expectTrack(c: Player) {
+        expectedId = c.currentMediaItem?.mediaId?.toLongOrNull()
+        expectedUntil = android.os.SystemClock.uptimeMillis() + QUEUE_SETTLE_MS
+        expectedCheck?.cancel()
+        expectedCheck = viewModelScope.launch {
+            delay(QUEUE_SETTLE_MS)
+            expectedId = null
+            controller?.let(::syncState)
+        }
+    }
 
     fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
@@ -591,6 +614,10 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     fun positionMs(): Long = controller?.currentPosition ?: 0L
 
     private fun syncState(player: Player) {
+        val expected = expectedId
+        if (expected != null && android.os.SystemClock.uptimeMillis() < expectedUntil &&
+            player.currentMediaItem?.mediaId?.toLongOrNull() != expected
+        ) return
         if (queueFrozen == null) {
             _upNext.value = upNextOf(player)
             _history.value = historyOf(player)

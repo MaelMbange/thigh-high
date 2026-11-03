@@ -151,7 +151,11 @@ fun PlayerScreen(
     favorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
 ) {
-    val palette = cover.palette
+    // The pictures drawn. They are held still while the strip moves, and
+    // swapped in one frame when it lands; the colors follow the picture
+    // shown, so they change with it rather than when the new cover is read.
+    var shownCover by remember { mutableStateOf(cover) }
+    val palette = shownCover.palette
     var showCover by rememberSaveable { mutableStateOf(true) }
     // The lyrics are looked up only while they are on screen.
     androidx.compose.runtime.DisposableEffect(showCover) {
@@ -243,9 +247,6 @@ fun PlayerScreen(
     var swipeJob by remember { mutableStateOf<Job?>(null) }
     // The direction of the last change, for the title; 0 fades it.
     var lastDirection by remember { mutableIntStateOf(0) }
-    // The pictures drawn. They are held still while the strip moves, and
-    // swapped in one frame when it lands.
-    var shownCover by remember { mutableStateOf(cover) }
     var shownNeighbors by remember { mutableStateOf(neighbors) }
     var moving by remember { mutableStateOf(false) }
     // A cover change after a swipe is instant; one from the music going on by
