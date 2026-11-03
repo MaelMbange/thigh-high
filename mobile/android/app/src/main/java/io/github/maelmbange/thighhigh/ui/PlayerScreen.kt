@@ -32,7 +32,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
@@ -307,7 +309,9 @@ fun PlayerScreen(
             .fillMaxSize()
             .graphicsLayer { translationY = dragOffset }
             .background(Brush.verticalGradient(listOf(lerp(background, palette.primary, 0.35f), background)))
-            .systemBarsPadding()
+            // The bottom inset is left to the "À suivre" strip, which runs
+            // down to the screen's edge behind the navigation bar.
+            .statusBarsPadding()
             .padding(horizontal = 16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -547,16 +551,25 @@ private const val MODE_IGNORED = 3
 private fun UpNextBanner(modifier: Modifier, onClick: () -> Unit) {
     Box(
         modifier
-            .fillMaxWidth()
-            .padding(bottom = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            // Room between the controls and the strip.
+            .padding(top = 20.dp)
+            // Edge to edge: out past the screen's side padding.
+            .layout { measurable, constraints ->
+                val bleed = SCREEN_PADDING.roundToPx()
+                val width = constraints.maxWidth + 2 * bleed
+                val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
+            }
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(
                 Brush.verticalGradient(
-                    listOf(TextColors.playing.copy(alpha = 0.04f), TextColors.playing.copy(alpha = 0.16f))
+                    listOf(TextColors.playing.copy(alpha = 0.06f), TextColors.playing.copy(alpha = 0.18f))
                 )
             )
             .clickable(onClick = onClick)
-            .height(36.dp),
+            // Down to the bottom of the screen; the label stays above the navigation bar.
+            .navigationBarsPadding()
+            .height(44.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -682,6 +695,9 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
         }
     }
 }
+
+/** The player's side margin, which the "À suivre" strip reaches past. */
+private val SCREEN_PADDING = 16.dp
 
 /** How much more the bars right under the position dot move (Mael's pick in the preview). */
 private const val SEEK_GAIN = 3.25f
