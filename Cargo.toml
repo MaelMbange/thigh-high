@@ -5,7 +5,7 @@ members = ["crates/core", "crates/tui", "crates/android"]
 default-members = ["crates/tui"]
 
 [workspace.package]
-version = "0.8.4"
+version = "0.8.5"
 edition = "2024"
 
 [workspace.dependencies]
