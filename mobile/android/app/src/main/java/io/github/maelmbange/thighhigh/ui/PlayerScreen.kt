@@ -423,13 +423,7 @@ fun PlayerScreen(
                 label = "visual",
             ) { coverShown ->
                 if (coverShown) {
-                    Crossfade(
-                        shownCover,
-                        animationSpec = if (instantSwap) snap() else tween(300),
-                        label = "cover",
-                    ) { c ->
-                        CoverArt(c, Modifier.fillMaxWidth().aspectRatio(1f).testTag("cover"))
-                    }
+                    CoverSwap(shownCover, instant = instantSwap)
                 } else {
                     // In place of the oscilloscope (kept in Oscilloscope.kt for later).
                     LyricsView(
@@ -861,5 +855,37 @@ private fun FavoriteButton(favorite: Boolean, color: Color, onToggle: () -> Unit
             Modifier.graphicsLayer { scaleX = bounce.value; scaleY = bounce.value },
             tint = if (favorite) color else LocalContentColor.current,
         )
+    }
+}
+
+/**
+ * The cover, crossfading when the music goes on by itself. After a swipe the
+ * new cover replaces the old one in the same frame: a Crossfade, even with
+ * no duration, still drew the old cover at full strength for one frame,
+ * which flashed it back right after the strip had landed.
+ */
+@Composable
+private fun CoverSwap(cover: Cover, instant: Boolean) {
+    var current by remember { mutableStateOf(cover) }
+    var previous by remember { mutableStateOf<Cover?>(null) }
+    // How far the new cover has faded in, 0 to 1.
+    var progress by remember { mutableFloatStateOf(1f) }
+    if (cover != current) {
+        // Decided while composing, so the very first frame is already right.
+        previous = if (instant) null else current
+        progress = if (instant) 1f else 0f
+        current = cover
+    }
+    LaunchedEffect(current) {
+        if (previous != null) {
+            animate(progress, 1f, animationSpec = tween(300)) { v, _ -> progress = v }
+            previous = null
+        }
+    }
+    Box {
+        previous?.let {
+            CoverArt(it, Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { alpha = 1f - progress })
+        }
+        CoverArt(current, Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { alpha = progress }.testTag("cover"))
     }
 }

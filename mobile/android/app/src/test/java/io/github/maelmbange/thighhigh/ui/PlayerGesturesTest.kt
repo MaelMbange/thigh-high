@@ -3,6 +3,7 @@ package io.github.maelmbange.thighhigh.ui
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -193,6 +194,44 @@ class PlayerGesturesTest {
         rule.mainClock.advanceTimeBy(2_000)
         assertEquals(1, next)
         assertEquals(0, minimized)
+    }
+
+    /**
+     * When the strip lands on the next cover, the old one must not be drawn
+     * again, not even for a frame (Mael saw it flash on the phone).
+     */
+    @Test fun swipeNeverFlashesTheOldCover() {
+        rule.mainClock.autoAdvance = false
+        var cover by mutableStateOf(Cover(null, CoverPalette.Default, 1))
+        rule.setContent {
+            ThighHighTheme {
+                PlayerScreen(
+                    track = Track(1, "Titre", "Artiste", null, null, null, null),
+                    playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000, hasPrevious = true, hasNext = true),
+                    cover = cover,
+                    positionMs = { 0L },
+                    onMinimize = {},
+                    onTogglePlay = {},
+                    onNext = { next++ },
+                    onPrevious = {},
+                    onCycleRepeat = {},
+                    onToggleShuffle = {},
+                    onSeek = {},
+                    neighbors = io.github.maelmbange.thighhigh.Neighbors(next = Cover(null, CoverPalette.Default, 2)),
+                )
+            }
+        }
+        rule.mainClock.advanceTimeBy(100)
+        rule.onRoot().performTouchInput { swipeLeft(startX = width * 0.9f, endX = width * 0.1f, durationMillis = 300) }
+        var most = 0
+        repeat(150) {
+            rule.mainClock.advanceTimeByFrame()
+            // The view model reads the new cover a little after the skip.
+            if (next == 1 && cover.trackId == 1L) cover = Cover(null, CoverPalette.Default, 2)
+            most = maxOf(most, rule.onAllNodesWithTag("cover").fetchSemanticsNodes().size)
+        }
+        assertEquals(1, next)
+        assertEquals(1, most)
     }
 
     @Test fun swipeRightOnCoverPlaysPrevious() {
