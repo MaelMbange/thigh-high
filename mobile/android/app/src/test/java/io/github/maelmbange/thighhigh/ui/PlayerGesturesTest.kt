@@ -3,6 +3,7 @@ package io.github.maelmbange.thighhigh.ui
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
@@ -203,11 +204,12 @@ class PlayerGesturesTest {
     @Test fun swipeNeverFlashesTheOldCover() {
         rule.mainClock.autoAdvance = false
         var cover by mutableStateOf(Cover(null, CoverPalette.Default, 1))
+        var current by mutableStateOf(1L)
         rule.setContent {
             ThighHighTheme {
                 PlayerScreen(
-                    track = Track(1, "Titre", "Artiste", null, null, null, null),
-                    playback = PlaybackState(currentId = 1, isPlaying = true, durationMs = 180_000, hasPrevious = true, hasNext = true),
+                    track = Track(current, if (current == 1L) "Titre" else "Suivant", "Artiste", null, null, null, null),
+                    playback = PlaybackState(currentId = current, isPlaying = true, durationMs = 180_000, hasPrevious = true, hasNext = true),
                     cover = cover,
                     positionMs = { 0L },
                     onMinimize = {},
@@ -218,20 +220,31 @@ class PlayerGesturesTest {
                     onToggleShuffle = {},
                     onSeek = {},
                     neighbors = io.github.maelmbange.thighhigh.Neighbors(next = Cover(null, CoverPalette.Default, 2)),
+                    trackOf = { id -> Track(id, if (id == 1L) "Titre" else "Suivant", "Artiste", null, null, null, null) },
                 )
             }
         }
         rule.mainClock.advanceTimeBy(100)
         rule.onRoot().performTouchInput { swipeLeft(startX = width * 0.9f, endX = width * 0.1f, durationMillis = 300) }
         var most = 0
+        var titlesAfter = 0
+        var landed = false
         repeat(150) {
             rule.mainClock.advanceTimeByFrame()
             // The view model reads the new cover a little after the skip.
-            if (next == 1 && cover.trackId == 1L) cover = Cover(null, CoverPalette.Default, 2)
+            if (next == 1 && cover.trackId == 1L) {
+                current = 2L
+                cover = Cover(null, CoverPalette.Default, 2)
+            }
             most = maxOf(most, rule.onAllNodesWithTag("cover").fetchSemanticsNodes().size)
+            // Once landed, the title is the new track's at once, never the old one again.
+            // (from the frame after the skip: the frame that calls it still holds the strip in motion)
+            if (next == 1 && landed) titlesAfter += rule.onAllNodesWithText("Titre").fetchSemanticsNodes().size
+            if (next == 1) landed = true
         }
         assertEquals(1, next)
         assertEquals(1, most)
+        assertEquals(0, titlesAfter)
     }
 
     @Test fun swipeRightOnCoverPlaysPrevious() {

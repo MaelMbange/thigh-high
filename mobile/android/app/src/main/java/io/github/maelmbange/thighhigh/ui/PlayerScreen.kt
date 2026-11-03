@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,6 +139,8 @@ fun PlayerScreen(
     /** Always the previous track: a swipe never just restarts this one. */
     onSkipPrevious: () -> Unit = onPrevious,
     neighbors: Neighbors = Neighbors(),
+    /** A track of the library by id: the titles beside the current one, for the swipe. */
+    trackOf: (Long) -> Track? = { null },
     history: List<QueueEntry> = emptyList(),
     upNext: List<QueueEntry> = emptyList(),
     onPlayQueued: (Int) -> Unit = {},
@@ -147,9 +150,9 @@ fun PlayerScreen(
     onRetryLyrics: () -> Unit = {},
     /** What the buttons and the cover swell with. */
     pulseSource: PulseSource = PulseSource.Bass,
-    /** Whether the track is in the favorites; the heart in the top bar switches it. */
-    favorite: Boolean = false,
-    onToggleFavorite: () -> Unit = {},
+    /** Whether a track is in the favorites; the heart in the top bar switches the one shown. */
+    isFavorite: (Long) -> Boolean = { false },
+    onToggleFavorite: (Track) -> Unit = {},
 ) {
     // The pictures drawn. They are held still while the strip moves, and
     // swapped in one frame when it lands; the colors follow the picture
@@ -248,6 +251,8 @@ fun PlayerScreen(
     // The direction of the last change, for the title; 0 fades it.
     var lastDirection by remember { mutableIntStateOf(0) }
     var shownNeighbors by remember { mutableStateOf(neighbors) }
+    // The title drawn, swapped with the picture so both change together.
+    var shownTrack by remember { mutableStateOf(track) }
     var moving by remember { mutableStateOf(false) }
     // A cover change after a swipe is instant; one from the music going on by
     // itself crossfades.
@@ -261,6 +266,22 @@ fun PlayerScreen(
         shownCover = cover
     }
     LaunchedEffect(neighbors, moving) { if (!moving) shownNeighbors = neighbors }
+    // Until the player reaches the track shown (a moment after a swipe), the
+    // seek bar and the lyrics show its start and its length from the library,
+    // not the end of the one before.
+    val settled = playback.currentId == shownTrack.id
+    val shownPlayback = if (settled) playback
+        else playback.copy(durationMs = shownTrack.duration?.inWholeMilliseconds ?: 0L)
+    val settledNow by rememberUpdatedState(settled)
+    val readPosition by rememberUpdatedState(positionMs)
+    val shownPosition: () -> Long = remember { { if (settledNow) readPosition() else 0L } }
+    // When the music goes on by itself, the title waits for the new cover so
+    // both crossfade together (or gives up waiting after half a second).
+    LaunchedEffect(track.id, shownCover.trackId) {
+        if (moving) return@LaunchedEffect
+        if (shownCover.trackId != track.id) delay(500)
+        shownTrack = track
+    }
 
     fun springBack() {
         swipeJob?.cancel()
@@ -288,6 +309,7 @@ fun PlayerScreen(
             val target = if (direction < 0) shownNeighbors.next else shownNeighbors.previous
             instantSwap = true
             if (target != null) shownCover = target
+            target?.trackId?.let(trackOf)?.let { shownTrack = it }
             swipe = 0f
             if (direction < 0) next() else skipPrevious()
             moving = false
@@ -330,7 +352,10 @@ fun PlayerScreen(
                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
             }
             Box(Modifier.weight(1f))
-            FavoriteButton(favorite, palette.primary, onToggleFavorite)
+            // Keyed by track: it bounces when tapped, not when the track changes.
+            key(shownTrack.id) {
+                FavoriteButton(isFavorite(shownTrack.id), palette.primary) { onToggleFavorite(shownTrack) }
+            }
             IconButton(onClick = { showCover = !showCover }) {
                 if (showCover) Icon(Icons.Default.Lyrics, stringResource(R.string.show_lyrics))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
@@ -423,14 +448,16 @@ fun PlayerScreen(
                 label = "visual",
             ) { coverShown ->
                 if (coverShown) {
-                    CoverSwap(shownCover, instant = instantSwap)
+                    Swap(shownCover, instant = instantSwap, key = { it.trackId to it.bitmap }) { c, m ->
+                        CoverArt(c, m.fillMaxWidth().aspectRatio(1f).then(if (c === shownCover) Modifier.testTag("cover") else Modifier))
+                    }
                 } else {
                     // In place of the oscilloscope (kept in Oscilloscope.kt for later).
                     LyricsView(
                         lyrics,
                         palette,
-                        positionMs,
-                        playback.durationMs,
+                        shownPosition,
+                        shownPlayback.durationMs,
                         onSeek,
                         onRetryLyrics,
                         Modifier.fillMaxWidth().aspectRatio(1f),
@@ -439,41 +466,36 @@ fun PlayerScreen(
             }
         }
 
-        // The title and artist slide the same way as the picture.
-        AnimatedContent(
-            track,
-            contentKey = { it.id },
-            transitionSpec = {
-                val d = lastDirection
-                if (d == 0) {
-                    fadeIn(tween(250)) togetherWith fadeOut(tween(200))
-                } else {
-                    (slideInHorizontally(tween(320)) { -d * it / 3 } + fadeIn(tween(320))) togetherWith
-                        (slideOutHorizontally(tween(200)) { d * it / 3 } + fadeOut(tween(160)))
+        // The title and artist ride the same strip as the picture: they move
+        // with the finger, the neighbours' titles come in beside them, and
+        // they swap in the very frame the picture does.
+        Box(Modifier.fillMaxWidth()) {
+            val page = visualWidth + gap
+            if (swipe != 0f) {
+                listOf(-1 to shownNeighbors.previous, 1 to shownNeighbors.next).forEach { (side, neighbour) ->
+                    neighbour?.trackId?.let(trackOf)?.let { t ->
+                        TrackTitle(
+                            t,
+                            Modifier.graphicsLayer {
+                                translationX = swipe + side * page
+                                alpha = 1f - (abs(translationX) / page).coerceIn(0f, 1f)
+                            },
+                        )
+                    }
                 }
-            },
-            label = "title",
-        ) { shown ->
-            Column(Modifier.fillMaxWidth()) {
-                Text(
-                    shown.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = TextColors.title,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    shown.artist ?: stringResource(R.string.unknown_artist),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextColors.artist,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            }
+            Swap(shownTrack, instant = instantSwap, key = { it.id }) { t, m ->
+                TrackTitle(
+                    t,
+                    m.graphicsLayer {
+                        translationX = swipe
+                        alpha *= 1f - (abs(swipe) / page).coerceIn(0f, 1f)
+                    },
                 )
             }
         }
 
-        SeekBar(playback, palette, positionMs, onSeek)
+        SeekBar(shownPlayback, palette, shownPosition, onSeek)
 
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
@@ -619,7 +641,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
     var position by remember { mutableLongStateOf(positionMs()) }
     // While the finger is on the bar, show where it is rather than the player.
     var dragFraction by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(Unit) {
+    // Read again at once when the track changes, then every quarter second.
+    LaunchedEffect(playback.durationMs) {
         while (true) {
             position = positionMs()
             delay(250)
@@ -858,34 +881,54 @@ private fun FavoriteButton(favorite: Boolean, color: Color, onToggle: () -> Unit
     }
 }
 
+@Composable
+private fun TrackTitle(track: Track, modifier: Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Text(
+            track.title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = TextColors.title,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            track.artist ?: stringResource(R.string.unknown_artist),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextColors.artist,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 /**
- * The cover, crossfading when the music goes on by itself. After a swipe the
- * new cover replaces the old one in the same frame: a Crossfade, even with
- * no duration, still drew the old cover at full strength for one frame,
- * which flashed it back right after the strip had landed.
+ * Shows [value], crossfading when it changes by itself (the music going on).
+ * After a swipe ([instant]) the new value replaces the old one in the same
+ * frame: a Crossfade, even with no duration, still drew the old one at full
+ * strength for one frame, which flashed it back right after the strip landed.
+ * [content] gets the modifier carrying the fade.
  */
 @Composable
-private fun CoverSwap(cover: Cover, instant: Boolean) {
-    var current by remember { mutableStateOf(cover) }
-    var previous by remember { mutableStateOf<Cover?>(null) }
-    // How far the new cover has faded in, 0 to 1.
+private fun <T> Swap(value: T, instant: Boolean, key: (T) -> Any? = { it }, content: @Composable (T, Modifier) -> Unit) {
+    var current by remember { mutableStateOf(value) }
+    var previous by remember { mutableStateOf<T?>(null) }
+    // How far the new value has faded in, 0 to 1.
     var progress by remember { mutableFloatStateOf(1f) }
-    if (cover != current) {
+    if (key(value) != key(current)) {
         // Decided while composing, so the very first frame is already right.
         previous = if (instant) null else current
         progress = if (instant) 1f else 0f
-        current = cover
     }
-    LaunchedEffect(current) {
+    current = value
+    LaunchedEffect(key(current)) {
         if (previous != null) {
             animate(progress, 1f, animationSpec = tween(300)) { v, _ -> progress = v }
             previous = null
         }
     }
     Box {
-        previous?.let {
-            CoverArt(it, Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { alpha = 1f - progress })
-        }
-        CoverArt(current, Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { alpha = progress }.testTag("cover"))
+        previous?.let { content(it, Modifier.graphicsLayer { alpha = 1f - progress }) }
+        content(current, Modifier.graphicsLayer { alpha = progress })
     }
 }

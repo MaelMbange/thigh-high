@@ -521,14 +521,15 @@ class MainActivity : ComponentActivity() {
                     upNext = upNext,
                     history = history,
                     neighbors = neighbors,
+                    trackOf = { id -> tracks?.firstOrNull { it.id == id } },
                     onPlayQueued = viewModel::playQueued,
                     onRemoveQueued = viewModel::removeQueued,
                     lyrics = lyrics,
                     onLyricsShown = { viewModel.lyricsShown.value = it },
                     onRetryLyrics = viewModel::retryLyrics,
                     pulseSource = pulseSource,
-                    favorite = track.id in favorites.trackIds,
-                    onToggleFavorite = { viewModel.toggleFavorite(track) },
+                    isFavorite = { id -> id in favorites.trackIds },
+                    onToggleFavorite = viewModel::toggleFavorite,
                 )
             }
         }
