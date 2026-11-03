@@ -684,10 +684,10 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
 }
 
 /** How much more the bars right under the position dot move (Mael's pick in the preview). */
-private const val SEEK_GAIN = 4f
+private const val SEEK_GAIN = 2.5f
 
 /** How many bars on each side of the dot the swell reaches before fading out. */
-private const val SEEK_REACH_BARS = 8f
+private const val SEEK_REACH_BARS = 5f
 
 /** Bars across the seek bar. */
 private const val BAR_COUNT = 48
