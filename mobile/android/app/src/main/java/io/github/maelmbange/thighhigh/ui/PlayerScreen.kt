@@ -111,6 +111,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import kotlin.math.exp
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
@@ -614,7 +615,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                // Taller than the bars at rest, so the ones near the dot can rise.
+                .height(72.dp)
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         if (currentDuration > 0) {
@@ -647,13 +649,18 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
             val barWidth = slot * 0.62f
             val mid = size.height / 2
             val minHeight = 3.dp.toPx()
-            val maxHeight = size.height - 14.dp.toPx()
-            fun height(i: Int) = minHeight + bars[i] * (maxHeight - minHeight)
+            val maxHeight = 34.dp.toPx()
+            val ceiling = size.height - 4.dp.toPx()
             val playedX = size.width * fraction
+            val sigma = SEEK_REACH_BARS / 2f
             for (i in 0 until n) {
                 val x = i * slot + (slot - barWidth) / 2
-                val h = height(i)
-                val color = if (x + barWidth / 2 <= playedX) lerp(palette.secondary, palette.tertiary, bars[i])
+                // The bars swing harder around the dot, fading out a few bars away.
+                val d = (x + barWidth / 2 - playedX) / slot
+                val boost = 1f + (SEEK_GAIN - 1f) * exp(-(d * d) / (2f * sigma * sigma))
+                val level = bars[i] * boost
+                val h = (minHeight + level * (maxHeight - minHeight)).coerceAtMost(ceiling)
+                val color = if (x + barWidth / 2 <= playedX) lerp(palette.secondary, palette.tertiary, level.coerceAtMost(1f))
                 else palette.secondary.copy(alpha = 0.25f)
                 drawRoundRect(
                     color,
@@ -675,6 +682,12 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
         }
     }
 }
+
+/** How much more the bars right under the position dot move (Mael's pick in the preview). */
+private const val SEEK_GAIN = 4f
+
+/** How many bars on each side of the dot the swell reaches before fading out. */
+private const val SEEK_REACH_BARS = 8f
 
 /** Bars across the seek bar. */
 private const val BAR_COUNT = 48
