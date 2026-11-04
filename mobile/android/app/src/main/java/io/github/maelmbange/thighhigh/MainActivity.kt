@@ -582,6 +582,7 @@ class MainActivity : ComponentActivity() {
                 cast.clearNotice()
                 // Searching stops with the screen; a broadcast or listening goes on.
                 cast.stopBrowsing()
+                cast.cancelBroadcast()
             }
             BackHandler(onBack = close)
             CastScreen(
@@ -590,7 +591,9 @@ class MainActivity : ComponentActivity() {
                 hasTrack = hasTrack,
                 heardMs = cast::heardMs,
                 onClose = close,
-                onBroadcast = { cast.clearNotice(); viewModel.startBroadcast() },
+                onBroadcast = { cast.clearNotice(); cast.prepareBroadcast() },
+                onStartBroadcast = { cast.clearNotice(); viewModel.startBroadcast() },
+                onCancelBroadcast = cast::cancelBroadcast,
                 onListen = { cast.clearNotice(); cast.startBrowsing() },
                 onSetOpen = cast::setOpen,
                 onForget = cast::forgetListeners,

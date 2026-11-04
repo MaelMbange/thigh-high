@@ -62,6 +62,8 @@ enum class CastNotice { WrongCode, CodeChanged, Full, OtherVersion, Unreachable,
 
 sealed interface CastUi {
     data object Idle : CastUi
+    /** "Diffuser" was chosen: the code or open mode is picked, nothing runs yet. */
+    data class ReadyToBroadcast(val name: String, val open: Boolean) : CastUi
     data class Broadcasting(
         val name: String,
         val open: Boolean,
@@ -118,6 +120,8 @@ class CastController(
     private var broadcastJob: Job? = null
     private var trackJob: Job? = null
     private var pushBuffer = ByteArray(0)
+    /** Set while the server starts, so a second tap starts nothing. */
+    private var starting = false
 
     private val sink = object : AudioTap.CastSink {
         override fun push(buffer: ByteBuffer, rate: Int, channels: Int, float: Boolean) {
@@ -131,22 +135,38 @@ class CastController(
         }
     }
 
-    fun startBroadcast(current: Track?, cover: Bitmap?) {
+    /** Shows the broadcast settings; [startBroadcast] then really starts it. */
+    fun prepareBroadcast() {
         if (_ui.value is CastUi.Broadcasting) return
+        stopListening()
+        stopBrowsing()
+        _ui.value = CastUi.ReadyToBroadcast(deviceName, open = false)
+    }
+
+    /** Back from the broadcast settings without starting. */
+    fun cancelBroadcast() {
+        if (_ui.value is CastUi.ReadyToBroadcast) _ui.value = CastUi.Idle
+    }
+
+    fun startBroadcast(current: Track?, cover: Bitmap?) {
+        val open = (_ui.value as? CastUi.ReadyToBroadcast)?.open ?: return
+        if (starting) return
+        starting = true
         stopListening()
         stopBrowsing()
         scope.launch {
             val handle = withContext(Dispatchers.IO) {
-                runCatching { CastNative.serverStart(dir, deviceName, false) }.getOrNull()
+                runCatching { CastNative.serverStart(dir, deviceName, open) }.getOrNull()
             }
+            starting = false
             if (handle == null) {
                 _notice.value = CastNotice.CantStart
                 return@launch
             }
             synchronized(serverLock) { server = handle }
             AudioTap.castSink = sink
-            _ui.value = CastUi.Broadcasting(deviceName, open = false, code = CastNative.serverCode(handle), listeners = emptyList(), visible = true)
-            announce(handle, open = false)
+            _ui.value = CastUi.Broadcasting(deviceName, open = open, code = CastNative.serverCode(handle), listeners = emptyList(), visible = true)
+            announce(handle, open = open)
             setTrack(current, cover)
             broadcastJob = scope.launch {
                 while (isActive) {
@@ -191,6 +211,10 @@ class CastController(
     }
 
     fun setOpen(open: Boolean) {
+        if (_ui.value is CastUi.ReadyToBroadcast) {
+            _ui.update { if (it is CastUi.ReadyToBroadcast) it.copy(open = open) else it }
+            return
+        }
         val handle = server.takeIf { it != 0L } ?: return
         CastNative.serverSetOpen(handle, open)
         _ui.update { if (it is CastUi.Broadcasting) it.copy(open = open) else it }

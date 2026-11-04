@@ -91,6 +91,8 @@ fun CastScreen(
     heardMs: () -> Long,
     onClose: () -> Unit,
     onBroadcast: () -> Unit,
+    onStartBroadcast: () -> Unit,
+    onCancelBroadcast: () -> Unit,
     onListen: () -> Unit,
     onSetOpen: (Boolean) -> Unit,
     onForget: () -> Unit,
@@ -124,6 +126,7 @@ fun CastScreen(
             AnimatedContent(ui, contentKey = { it::class }, label = "cast", modifier = Modifier.fillMaxSize()) { state ->
                 when (state) {
                     CastUi.Idle -> Choice(onBroadcast, onListen)
+                    is CastUi.ReadyToBroadcast -> Prepare(state, hasTrack, onSetOpen, onStartBroadcast, onCancelBroadcast)
                     is CastUi.Broadcasting -> Broadcasting(state, hasTrack, onSetOpen, onForget, onStopBroadcast)
                     is CastUi.Browsing -> Browsing(state, onConnect, onBack)
                     is CastUi.Connecting -> Waiting(stringResource(R.string.cast_connecting, state.name), onCancel)
@@ -188,6 +191,55 @@ private fun BigButton(icon: ImageVector, title: String, hint: String, onClick: (
     }
 }
 
+/** Before broadcasting: who may listen, then an explicit start. */
+@Composable
+private fun Prepare(
+    ui: CastUi.ReadyToBroadcast,
+    hasTrack: Boolean,
+    onSetOpen: (Boolean) -> Unit,
+    onStart: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Default.Podcasts, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.cast_will_appear_as, ui.name), color = TextColors.title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        OpenSwitch(ui.open, onSetOpen)
+        Text(
+            stringResource(if (ui.open) R.string.cast_open_on else R.string.cast_open_off_before),
+            color = TextColors.info,
+            textAlign = TextAlign.Center,
+        )
+        if (!hasTrack) {
+            Text(stringResource(R.string.cast_play_something), color = TextColors.info, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.weight(1f))
+        Button(onClick = onStart, modifier = Modifier.fillMaxWidth().testTag("castStart")) {
+            Text(stringResource(R.string.cast_start_broadcast))
+        }
+        OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.cast_cancel))
+        }
+    }
+}
+
+@Composable
+private fun OpenSwitch(open: Boolean, onSetOpen: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onSetOpen(!open) }
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (open) Icons.Default.LockOpen else Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.secondary)
+        Spacer(Modifier.width(12.dp))
+        Text(stringResource(R.string.cast_open), Modifier.weight(1f), color = TextColors.title, style = MaterialTheme.typography.titleMedium)
+        Switch(open, onCheckedChange = onSetOpen, modifier = Modifier.testTag("castOpen"))
+    }
+}
+
 @Composable
 private fun Broadcasting(
     ui: CastUi.Broadcasting,
@@ -207,16 +259,7 @@ private fun Broadcasting(
         if (!ui.visible) {
             Text(stringResource(R.string.cast_not_visible), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
         }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onSetOpen(!ui.open) }
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(if (ui.open) Icons.Default.LockOpen else Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.secondary)
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.cast_open), Modifier.weight(1f), color = TextColors.title, style = MaterialTheme.typography.titleMedium)
-            Switch(ui.open, onCheckedChange = onSetOpen, modifier = Modifier.testTag("castOpen"))
-        }
+        OpenSwitch(ui.open, onSetOpen)
         if (ui.open) {
             Text(stringResource(R.string.cast_open_on), color = TextColors.info, textAlign = TextAlign.Center)
         } else {

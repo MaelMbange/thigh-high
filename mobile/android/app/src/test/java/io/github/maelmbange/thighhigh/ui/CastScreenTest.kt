@@ -44,6 +44,8 @@ class CastScreenTest {
                 heardMs = { 1_500 },
                 onClose = { calls += "close" },
                 onBroadcast = { calls += "broadcast" },
+                onStartBroadcast = { calls += "start" },
+                onCancelBroadcast = { calls += "cancelBroadcast" },
                 onListen = { calls += "listen" },
                 onSetOpen = { calls += "open:$it" },
                 onForget = { calls += "forget" },
@@ -64,6 +66,17 @@ class CastScreenTest {
         rule.onNodeWithText("Diffuser").performClick()
         rule.onNodeWithText("S'abonner").performClick()
         assertEquals(listOf("broadcast", "listen"), calls)
+    }
+
+    @Test
+    fun broadcastStartsOnlyWithTheButton() {
+        ui = CastUi.ReadyToBroadcast("Pixel", open = false)
+        show()
+        rule.onNodeWithTag("castCode").assertDoesNotExist()
+        rule.onNodeWithTag("castOpen").performClick()
+        rule.onNodeWithText("Annuler").performClick()
+        rule.onNodeWithText("Démarrer la diffusion").performClick()
+        assertEquals(listOf("open:true", "cancelBroadcast", "start"), calls)
     }
 
     @Test
