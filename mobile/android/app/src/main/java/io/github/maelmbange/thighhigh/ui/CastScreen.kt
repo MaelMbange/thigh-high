@@ -1,0 +1,383 @@
+package io.github.maelmbange.thighhigh.ui
+
+import android.app.Activity
+import android.view.WindowManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Podcasts
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.maelmbange.thighhigh.LyricsState
+import io.github.maelmbange.thighhigh.R
+import io.github.maelmbange.thighhigh.cast.CastNotice
+import io.github.maelmbange.thighhigh.cast.CastTrack
+import io.github.maelmbange.thighhigh.cast.CastUi
+import io.github.maelmbange.thighhigh.cast.Found
+import io.github.maelmbange.thighhigh.lyrics.Lyrics
+
+/**
+ * The broadcast screen: "Diffuser" makes this phone a radio for the
+ * network, "S'abonner" listens to one. Everything else (finding devices,
+ * the code, the audio) is in CastController.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CastScreen(
+    ui: CastUi,
+    notice: CastNotice?,
+    hasTrack: Boolean,
+    heardMs: () -> Long,
+    onClose: () -> Unit,
+    onBroadcast: () -> Unit,
+    onListen: () -> Unit,
+    onSetOpen: (Boolean) -> Unit,
+    onForget: () -> Unit,
+    onStopBroadcast: () -> Unit,
+    onConnect: (Found) -> Unit,
+    onSubmitCode: (String) -> Unit,
+    onCancel: () -> Unit,
+    onStopListening: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+            TopAppBar(
+                title = { Text(stringResource(R.string.cast), color = TextColors.title) },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+            notice?.let {
+                Text(
+                    noticeText(it),
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).testTag("castNotice"),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            // Slides between steps; within a step, its content just updates.
+            AnimatedContent(ui, contentKey = { it::class }, label = "cast", modifier = Modifier.fillMaxSize()) { state ->
+                when (state) {
+                    CastUi.Idle -> Choice(onBroadcast, onListen)
+                    is CastUi.Broadcasting -> Broadcasting(state, hasTrack, onSetOpen, onForget, onStopBroadcast)
+                    is CastUi.Browsing -> Browsing(state, onConnect, onBack)
+                    is CastUi.Connecting -> Waiting(stringResource(R.string.cast_connecting, state.name), onCancel)
+                    is CastUi.AskingCode -> AskCode(state, onSubmitCode, onCancel)
+                    is CastUi.Listening -> Listening(state, heardMs, onStopListening)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun noticeText(notice: CastNotice): String = stringResource(
+    when (notice) {
+        CastNotice.WrongCode -> R.string.cast_wrong_code
+        CastNotice.CodeChanged -> R.string.cast_code_changed
+        CastNotice.Full -> R.string.cast_full
+        CastNotice.OtherVersion -> R.string.cast_other_version
+        CastNotice.Unreachable -> R.string.cast_unreachable
+        CastNotice.Ended -> R.string.cast_ended
+        CastNotice.Lost -> R.string.cast_lost
+        CastNotice.CantStart -> R.string.cast_cant_start
+    }
+)
+
+/** The two big buttons. */
+@Composable
+private fun Choice(onBroadcast: () -> Unit, onListen: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+    ) {
+        Text(stringResource(R.string.cast_intro), color = TextColors.info, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        BigButton(Icons.Default.Podcasts, stringResource(R.string.cast_broadcast), stringResource(R.string.cast_broadcast_hint), onBroadcast)
+        BigButton(Icons.Default.Headphones, stringResource(R.string.cast_listen), stringResource(R.string.cast_listen_hint), onListen)
+        Text(
+            stringResource(R.string.cast_privacy),
+            color = TextColors.info,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun BigButton(icon: ImageVector, title: String, hint: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Spacer(Modifier.width(20.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Broadcasting(
+    ui: CastUi.Broadcasting,
+    hasTrack: Boolean,
+    onSetOpen: (Boolean) -> Unit,
+    onForget: () -> Unit,
+    onStop: () -> Unit,
+) {
+    var forgotten by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Default.Podcasts, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.cast_visible_as, ui.name), color = TextColors.title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        if (!ui.visible) {
+            Text(stringResource(R.string.cast_not_visible), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+        }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onSetOpen(!ui.open) }
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (ui.open) Icons.Default.LockOpen else Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.secondary)
+            Spacer(Modifier.width(12.dp))
+            Text(stringResource(R.string.cast_open), Modifier.weight(1f), color = TextColors.title, style = MaterialTheme.typography.titleMedium)
+            Switch(ui.open, onCheckedChange = onSetOpen, modifier = Modifier.testTag("castOpen"))
+        }
+        if (ui.open) {
+            Text(stringResource(R.string.cast_open_on), color = TextColors.info, textAlign = TextAlign.Center)
+        } else {
+            Text(stringResource(R.string.cast_open_off), color = TextColors.info, textAlign = TextAlign.Center)
+            Text(
+                ui.code.chunked(3).joinToString(" "),
+                Modifier.testTag("castCode"),
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 4.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            if (ui.listeners.isEmpty()) stringResource(R.string.cast_nobody)
+            else stringResource(R.string.cast_listeners, ui.listeners.joinToString(", ")),
+            color = if (ui.listeners.isEmpty()) TextColors.info else TextColors.genre,
+            textAlign = TextAlign.Center,
+        )
+        if (!hasTrack) {
+            Text(stringResource(R.string.cast_play_something), color = TextColors.info, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = { onForget(); forgotten = true }, enabled = !forgotten) {
+            Text(stringResource(if (forgotten) R.string.cast_forgotten else R.string.cast_forget), textAlign = TextAlign.Center)
+        }
+        Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cast_stop_broadcast)) }
+    }
+}
+
+@Composable
+private fun Browsing(ui: CastUi.Browsing, onConnect: (Found) -> Unit, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+        Row(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(stringResource(R.string.cast_searching), color = TextColors.info)
+        }
+        LazyColumn(Modifier.weight(1f)) {
+            items(ui.found, key = { it.key }) { device ->
+                ListItem(
+                    headlineContent = { Text(device.name, color = TextColors.title) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                when {
+                                    !device.compatible -> R.string.cast_device_other_version
+                                    device.open -> R.string.cast_device_open
+                                    else -> R.string.cast_device_code
+                                }
+                            ),
+                            color = TextColors.genre,
+                        )
+                    },
+                    leadingContent = { Icon(Icons.Default.Podcasts, null, tint = MaterialTheme.colorScheme.primary) },
+                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
+                    modifier = Modifier.clickable { onConnect(device) }.testTag("castDevice"),
+                )
+            }
+        }
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+            Text(stringResource(R.string.cast_cancel))
+        }
+    }
+}
+
+@Composable
+private fun Waiting(text: String, onCancel: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator()
+        Text(text, color = TextColors.info, textAlign = TextAlign.Center)
+        OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cast_cancel)) }
+    }
+}
+
+@Composable
+private fun AskCode(ui: CastUi.AskingCode, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+    var code by rememberSaveable { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.cast_enter_code, ui.name), color = TextColors.title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        OutlinedTextField(
+            value = code,
+            onValueChange = { typed -> code = typed.filter(Char::isDigit).take(6) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineMedium.copy(textAlign = TextAlign.Center, letterSpacing = 6.sp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.width(220.dp).testTag("castCodeInput"),
+        )
+        ui.error?.let { Text(noticeText(it), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+        Text(stringResource(R.string.cast_code_once), color = TextColors.info, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cast_cancel)) }
+            Button(onClick = { onSubmit(code) }, enabled = code.length == 6) { Text(stringResource(R.string.cast_send_code)) }
+        }
+    }
+}
+
+@Composable
+private fun Listening(ui: CastUi.Listening, heardMs: () -> Long, onStop: () -> Unit) {
+    // What is heard here can't be captured in a screenshot or screen recording.
+    val activity = LocalContext.current as? Activity
+    DisposableEffect(activity) {
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            stringResource(R.string.cast_live_from, ui.name) + if (ui.playing) "" else " · " + stringResource(R.string.cast_paused),
+            color = TextColors.genre,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Spacer(Modifier.height(12.dp))
+        val track = ui.track
+        if (track == null) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.cast_waiting), color = TextColors.info)
+            }
+        } else {
+            CastCover(track)
+            Spacer(Modifier.height(12.dp))
+            Text(track.title, color = TextColors.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            if (track.artist.isNotEmpty()) Text(track.artist, color = TextColors.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            LyricsView(
+                state = LyricsState.Ready(track.lyrics ?: Lyrics.NotFound),
+                palette = track.palette,
+                positionMs = heardMs,
+                durationMs = track.durationMs,
+                onSeek = {},
+                onRetry = {},
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+        Button(onClick = onStop, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Text(stringResource(R.string.cast_stop_listening))
+        }
+    }
+}
+
+@Composable
+private fun CastCover(track: CastTrack) {
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        Modifier.fillMaxWidth(0.55f).aspectRatio(1f).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        val cover = track.cover
+        if (cover != null) {
+            Image(cover.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Icon(Icons.Default.MusicNote, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}

@@ -21,7 +21,16 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
 
     /** The audio track buffer (fixed in PlaybackService) plus typical output latency. */
     const val AUDIO_BUFFER_MS = 250
-    private const val OUTPUT_LAG_MS = AUDIO_BUFFER_MS + 40
+    /** How far the samples tapped here are ahead of what is heard. */
+    const val OUTPUT_LAG_MS = AUDIO_BUFFER_MS + 40
+
+    /** Where the tapped audio also goes while broadcasting (see CastController). */
+    interface CastSink {
+        fun push(buffer: ByteBuffer, rate: Int, channels: Int, float: Boolean)
+    }
+
+    @Volatile
+    var castSink: CastSink? = null
 
     /** Without fresh audio for this long (paused, stopped) the trace goes flat. */
     private const val STALE_MS = 150 + OUTPUT_LAG_MS
@@ -53,6 +62,12 @@ object AudioTap : TeeAudioProcessor.AudioBufferSink {
     }
 
     override fun handleBuffer(buffer: ByteBuffer) {
+        castSink?.let { sink ->
+            val encoding = encoding
+            if (encoding == C.ENCODING_PCM_16BIT || encoding == C.ENCODING_PCM_FLOAT) {
+                sink.push(buffer, sampleRate, channels, encoding == C.ENCODING_PCM_FLOAT)
+            }
+        }
         val data = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         synchronized(lock) {
             val bytes = when (encoding) {

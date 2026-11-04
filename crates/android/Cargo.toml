@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 thigh-high-core = { path = "../core" }
+thigh-high-cast = { path = "../cast" }
 jni = "0.21.1"

@@ -93,8 +93,9 @@ val cargoBuild by tasks.registering(Exec::class) {
     workingDir = repoRoot
     inputs.dir(repoRoot.resolve("crates/core/src"))
     inputs.dir(repoRoot.resolve("crates/android/src"))
+    inputs.dir(repoRoot.resolve("crates/cast/src"))
     inputs.dir(repoRoot.resolve("assets"))
-    inputs.files(repoRoot.resolve("Cargo.lock"), repoRoot.resolve("crates/core/Cargo.toml"), repoRoot.resolve("crates/android/Cargo.toml"))
+    inputs.files(repoRoot.resolve("Cargo.lock"), repoRoot.resolve("crates/core/Cargo.toml"), repoRoot.resolve("crates/android/Cargo.toml"), repoRoot.resolve("crates/cast/Cargo.toml"))
     outputs.dir(rustJniLibs)
     doFirst {
         environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)

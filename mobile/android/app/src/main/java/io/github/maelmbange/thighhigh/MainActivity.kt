@@ -42,7 +42,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Settings
+import io.github.maelmbange.thighhigh.ui.CastScreen
 import io.github.maelmbange.thighhigh.ui.SettingsSheet
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Home
@@ -105,7 +107,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             // The whole interface follows the cover of the track that plays.
             val cover by viewModel.cover.collectAsStateWithLifecycle()
-            ThighHighTheme(cover.palette) {
+            val cast by viewModel.cast.ui.collectAsStateWithLifecycle()
+            // While listening to another device, its cover colors the app.
+            val palette = (cast as? io.github.maelmbange.thighhigh.cast.CastUi.Listening)?.track?.palette ?: cover.palette
+            ThighHighTheme(palette) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     App(viewModel)
                 }
@@ -221,6 +226,9 @@ class MainActivity : ComponentActivity() {
         val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
         val neighbors by viewModel.neighbors.collectAsStateWithLifecycle()
         var settingsOpen by remember { mutableStateOf(false) }
+        val castUi by viewModel.cast.ui.collectAsStateWithLifecycle()
+        val castNotice by viewModel.cast.notice.collectAsStateWithLifecycle()
+        val castOpen by viewModel.castOpen.collectAsStateWithLifecycle()
         val pulseSource by viewModel.pulseSource.collectAsStateWithLifecycle()
         // The track whose actions sheet is open, and the playlist it was pressed in.
         var actionTrack by remember { mutableStateOf<Pair<Track, Playlist?>?>(null) }
@@ -252,6 +260,16 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.castOpen.value = true }) {
+                            // Lit up while broadcasting or listening.
+                            Icon(
+                                Icons.Default.Podcasts,
+                                stringResource(R.string.cast),
+                                tint = if (castUi is io.github.maelmbange.thighhigh.cast.CastUi.Broadcasting ||
+                                    castUi is io.github.maelmbange.thighhigh.cast.CastUi.Listening
+                                ) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Unspecified,
+                            )
+                        }
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Default.Settings, stringResource(R.string.settings))
                         }
@@ -545,6 +563,44 @@ class MainActivity : ComponentActivity() {
                     onToggleFavorite = viewModel::toggleFavorite,
                 )
             }
+        }
+
+        // The broadcast screen slides over everything, the player included.
+        CastOverlay(viewModel, castOpen, castUi, castNotice, hasTrack = current != null)
+    }
+
+    @Composable
+    private fun CastOverlay(viewModel: LibraryViewModel, open: Boolean, ui: io.github.maelmbange.thighhigh.cast.CastUi, notice: io.github.maelmbange.thighhigh.cast.CastNotice?, hasTrack: Boolean) {
+        val cast = viewModel.cast
+        AnimatedVisibility(
+            visible = open,
+            enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(200)),
+            exit = slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)),
+        ) {
+            val close = {
+                viewModel.castOpen.value = false
+                cast.clearNotice()
+                // Searching stops with the screen; a broadcast or listening goes on.
+                cast.stopBrowsing()
+            }
+            BackHandler(onBack = close)
+            CastScreen(
+                ui = ui,
+                notice = notice,
+                hasTrack = hasTrack,
+                heardMs = cast::heardMs,
+                onClose = close,
+                onBroadcast = { cast.clearNotice(); viewModel.startBroadcast() },
+                onListen = { cast.clearNotice(); cast.startBrowsing() },
+                onSetOpen = cast::setOpen,
+                onForget = cast::forgetListeners,
+                onStopBroadcast = cast::stopBroadcast,
+                onConnect = { cast.clearNotice(); cast.connect(it) },
+                onSubmitCode = { cast.clearNotice(); cast.submitCode(it) },
+                onCancel = cast::cancelConnecting,
+                onStopListening = cast::stopListening,
+                onBack = cast::stopBrowsing,
+            )
         }
     }
 

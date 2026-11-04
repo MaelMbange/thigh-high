@@ -162,4 +162,45 @@
         <item quantity="one">%1$d fichier n\'a pas pu être modifié (ajouté par une autre app)</item>
         <item quantity="other">%1$d fichiers n\'ont pas pu être modifiés (ajoutés par une autre app)</item>
     </plurals>
+
+    <!-- Broadcasting on the local network. -->
+    <string name="cast">Diffusion</string>
+    <string name="cast_intro">Partage ta musique avec les appareils de ce réseau, ou écoute l\'un d\'eux en direct, comme une radio.</string>
+    <string name="cast_broadcast">Diffuser</string>
+    <string name="cast_broadcast_hint">Les appareils du réseau peuvent écouter ce que tu joues.</string>
+    <string name="cast_listen">S\'abonner</string>
+    <string name="cast_listen_hint">Écouter un appareil qui diffuse sur ce réseau.</string>
+    <string name="cast_privacy">Chiffré. Seuls le son, la pochette et les paroles sont envoyés : aucun fichier ne peut être téléchargé.</string>
+    <string name="cast_visible_as">Visible sous le nom « %1$s »</string>
+    <string name="cast_not_visible">Impossible de s\'annoncer sur le réseau : les autres appareils ne te voient pas.</string>
+    <string name="cast_open">Ouvert</string>
+    <string name="cast_open_on">Tout le monde sur ce réseau peut écouter, sans code.</string>
+    <string name="cast_open_off">Les nouveaux appareils doivent taper ce code (une seule fois) :</string>
+    <string name="cast_nobody">Personne n\'écoute pour l\'instant.</string>
+    <string name="cast_listeners">À l\'écoute : %1$s</string>
+    <string name="cast_play_something">Lance un morceau : tes auditeurs entendent ce que tu écoutes.</string>
+    <string name="cast_forget">Oublier les appareils appairés</string>
+    <string name="cast_forgotten">Les appareils appairés devront retaper le code.</string>
+    <string name="cast_stop_broadcast">Arrêter la diffusion</string>
+    <string name="cast_searching">Recherche des appareils qui diffusent sur ce réseau…</string>
+    <string name="cast_device_open">ouvert</string>
+    <string name="cast_device_code">avec code</string>
+    <string name="cast_device_other_version">autre version</string>
+    <string name="cast_connecting">Connexion à %1$s…</string>
+    <string name="cast_enter_code">Tape le code affiché sur %1$s</string>
+    <string name="cast_code_once">Il n\'est demandé qu\'une fois pour cet appareil.</string>
+    <string name="cast_send_code">Valider</string>
+    <string name="cast_cancel">Annuler</string>
+    <string name="cast_live_from">En direct de %1$s</string>
+    <string name="cast_paused">En pause</string>
+    <string name="cast_waiting">En attente de musique…</string>
+    <string name="cast_stop_listening">Arrêter l\'écoute</string>
+    <string name="cast_wrong_code">Code incorrect, réessaie.</string>
+    <string name="cast_code_changed">Trop d\'essais : un nouveau code est affiché sur l\'appareil.</string>
+    <string name="cast_full">Cet appareil a déjà trop d\'auditeurs.</string>
+    <string name="cast_other_version">Cet appareil utilise une autre version de thigh-high.</string>
+    <string name="cast_unreachable">Impossible de joindre l\'appareil sur le réseau.</string>
+    <string name="cast_ended">La diffusion est terminée.</string>
+    <string name="cast_lost">La connexion a été perdue.</string>
+    <string name="cast_cant_start">Impossible de démarrer la diffusion.</string>
 </resources>

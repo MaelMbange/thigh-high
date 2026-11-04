@@ -3,6 +3,8 @@
 //! The app decodes audio with Android's own codecs and hands the samples
 //! here, the same way the terminal app hands over what ffmpeg decoded.
 
+mod cast;
+
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;

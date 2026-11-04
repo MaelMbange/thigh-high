@@ -3039,6 +3039,7 @@ name = "thigh-high-android"
 version = "0.8.14"
 dependencies = [
  "jni 0.21.1",
+ "thigh-high-cast",
  "thigh-high-core",
 ]
 

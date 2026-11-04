@@ -233,6 +233,24 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     private val lyricsRepository = LyricsRepository(app)
 
+    /** Broadcasting on the local network ("Diffuser" / "S'abonner"). */
+    val cast = io.github.maelmbange.thighhigh.cast.CastController(
+        app,
+        viewModelScope,
+        position = { controller?.currentPosition ?: 0L },
+        isPlaying = { controller?.isPlaying == true },
+        onListenStart = { controller?.pause() },
+    )
+
+    /** Whether the broadcast screen is shown. */
+    val castOpen = MutableStateFlow(false)
+
+    /** Starts broadcasting what plays, from the track playing now. */
+    fun startBroadcast() {
+        val id = playback.value.currentId
+        cast.startBroadcast(_tracks.value?.firstOrNull { it.id == id }, _cover.value.takeIf { it.trackId == id }?.bitmap)
+    }
+
     /** Whether the lyrics are on screen: only then are they looked up. */
     val lyricsShown = MutableStateFlow(false)
 
@@ -280,6 +298,21 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
                         LyricsState.Ready(Lyrics.NotFound)
                     }
                 }
+        }
+        // Listeners hear the new track's title, cover and lyrics as it starts.
+        viewModelScope.launch {
+            combine(_cover, _tracks) { cover, tracks -> cover to tracks }.collect { (cover, tracks) ->
+                if (cast.ui.value !is io.github.maelmbange.thighhigh.cast.CastUi.Broadcasting) return@collect
+                val id = playback.value.currentId ?: return@collect
+                if (cover.trackId != id) return@collect
+                cast.setTrack(tracks?.firstOrNull { it.id == id }, cover.bitmap)
+            }
+        }
+        // Playing our own music again ends listening to someone else's.
+        viewModelScope.launch {
+            playback.map { it.isPlaying }.distinctUntilChanged().collect { playing ->
+                if (playing && cast.isListening) cast.stopListening()
+            }
         }
         viewModelScope.launch {
             neighborIds.collect { (prev, next) ->
@@ -727,6 +760,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        cast.stopAll()
         controller?.removeListener(listener)
         // Releasing the controller does not stop playback: the service keeps playing.
         MediaController.releaseFuture(controllerFuture)
