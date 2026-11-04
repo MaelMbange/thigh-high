@@ -31,6 +31,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -967,6 +968,10 @@ internal fun LivePlayerScreen(
     onStop: () -> Unit,
     onSwitch: () -> Unit,
     pulseSource: PulseSource = PulseSource.Bass,
+    /** The broadcaster's radios: when there are some, live and each radio can be picked. */
+    radios: List<io.github.maelmbange.thighhigh.cast.CastChannel> = emptyList(),
+    channel: Int = io.github.maelmbange.thighhigh.cast.CastNative.LIVE,
+    onTune: (Int) -> Unit = {},
 ) {
     val palette = track?.palette ?: CoverPalette.Default
     val background = MaterialTheme.colorScheme.background
@@ -997,6 +1002,27 @@ internal fun LivePlayerScreen(
             IconButton(onClick = { showCover = !showCover }, enabled = track != null) {
                 if (showCover) Icon(Icons.Default.Lyrics, stringResource(R.string.show_lyrics))
                 else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
+            }
+        }
+        if (radios.isNotEmpty()) {
+            val live = io.github.maelmbange.thighhigh.cast.CastChannel(
+                io.github.maelmbange.thighhigh.cast.CastNative.LIVE,
+                stringResource(R.string.cast_live),
+            )
+            androidx.compose.foundation.lazy.LazyRow(
+                Modifier.fillMaxWidth().testTag("castChannels"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(listOf(live) + radios, key = { it.id }) { option ->
+                    androidx.compose.material3.FilterChip(
+                        selected = option.id == channel,
+                        onClick = { onTune(option.id) },
+                        label = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = palette.primary.copy(alpha = 0.35f),
+                        ),
+                    )
+                }
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {

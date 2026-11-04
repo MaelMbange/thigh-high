@@ -69,6 +69,8 @@ import io.github.maelmbange.thighhigh.cast.CastUi
 import io.github.maelmbange.thighhigh.cast.Found
 import io.github.maelmbange.thighhigh.cast.CastListener
 import io.github.maelmbange.thighhigh.cast.PairedDevice
+import io.github.maelmbange.thighhigh.cast.RadioOption
+import androidx.compose.material.icons.filled.Radio
 import io.github.maelmbange.thighhigh.playback.PulseSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -104,11 +106,16 @@ fun CastScreen(
     onSwitchChannel: () -> Unit,
     onBack: () -> Unit,
     pulseSource: PulseSource = PulseSource.Bass,
+    /** The playlists that can be broadcast as radios. */
+    radios: List<RadioOption> = emptyList(),
+    onSetRadio: (String, Boolean) -> Unit = { _, _ -> },
+    /** Hears another channel of the device listened to. */
+    onTune: (Int) -> Unit = {},
 ) {
     // Listening takes the whole screen: the player's, without its controls.
     if (ui is CastUi.Listening) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Listening(ui, heardMs, onStopListening, onSwitchChannel, pulseSource)
+            Listening(ui, heardMs, onStopListening, onSwitchChannel, onTune, pulseSource)
         }
         return
     }
@@ -150,7 +157,7 @@ fun CastScreen(
                 when (state) {
                     CastUi.Idle -> Choice(onBroadcast, onListen)
                     is CastUi.ReadyToBroadcast, is CastUi.Broadcasting ->
-                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onForgetPaired, onForgetAllPaired, onStopBroadcast)
+                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onForgetPaired, onForgetAllPaired, onStopBroadcast, radios, onSetRadio)
                     is CastUi.Browsing -> Browsing(state, onConnect, onBack)
                     is CastUi.Connecting -> Waiting(stringResource(R.string.cast_connecting, state.name), onCancel)
                     is CastUi.AskingCode -> AskCode(state, onSubmitCode, onCancel)
@@ -173,6 +180,7 @@ private fun noticeText(notice: CastNotice): String = stringResource(
         CastNotice.Ended -> R.string.cast_ended
         CastNotice.Lost -> R.string.cast_lost
         CastNotice.CantStart -> R.string.cast_cant_start
+        CastNotice.NeedsCodeAgain -> R.string.cast_needs_code_again
     }
 )
 
@@ -256,6 +264,8 @@ private fun Broadcast(
     onForgetPaired: (String) -> Unit,
     onForgetAll: () -> Unit,
     onStop: () -> Unit,
+    radios: List<RadioOption>,
+    onSetRadio: (String, Boolean) -> Unit,
 ) {
     val running = state as? CastUi.Broadcasting
     val name = running?.name ?: (state as CastUi.ReadyToBroadcast).name
@@ -302,6 +312,7 @@ private fun Broadcast(
             if (!hasTrack) {
                 Text(stringResource(R.string.cast_play_something), color = TextColors.info, textAlign = TextAlign.Center)
             }
+            RadioList(radios, running?.listeners, onSetRadio)
             if (running != null) DeviceList(running.paired, running.listeners, onForgetPaired, onForgetAll)
         }
         if (running != null) {
@@ -310,6 +321,55 @@ private fun Broadcast(
             // No "Annuler" here: the back arrow leaves without broadcasting.
             Button(onClick = onStart, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("castStart")) {
                 Text(stringResource(R.string.cast_start_broadcast))
+            }
+        }
+    }
+}
+
+/**
+ * The playlists, each with a switch: on, it is offered as a radio that
+ * listeners can tune to instead of what this phone plays.
+ */
+@Composable
+private fun RadioList(radios: List<RadioOption>, listening: List<CastListener>?, onSetRadio: (String, Boolean) -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(vertical = 8.dp)) {
+        Text(
+            stringResource(R.string.cast_radios_title),
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            color = TextColors.title,
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text(
+            stringResource(if (radios.isEmpty()) R.string.cast_radios_none else R.string.cast_radios_hint),
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            color = TextColors.info,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        radios.forEach { radio ->
+            val heard = listening?.count { it.radio == radio.name && radio.on } ?: 0
+            Row(
+                Modifier.fillMaxWidth().height(56.dp)
+                    .clickable(enabled = radio.trackCount > 0) { onSetRadio(radio.playlistId, !radio.on) }
+                    .padding(start = 16.dp, end = 16.dp).testTag("castRadioRow"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Radio, null, tint = if (heard > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(radio.name, color = TextColors.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (heard > 0) stringResource(R.string.cast_radio_listeners, radio.trackCount, heard)
+                        else stringResource(R.string.cast_radio_tracks, radio.trackCount),
+                        color = if (heard > 0) TextColors.genre else TextColors.info,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    radio.on,
+                    onCheckedChange = { onSetRadio(radio.playlistId, it) },
+                    enabled = radio.trackCount > 0,
+                    modifier = Modifier.testTag("castRadio"),
+                )
             }
         }
     }
@@ -328,6 +388,7 @@ private fun DeviceList(
     onForgetAll: () -> Unit,
 ) {
     val listeningIds = listening.mapNotNull { it.pairedId }.toSet()
+    val radioOf = listening.filter { it.pairedId != null }.associate { it.pairedId to it.radio }
     val guests = listening.filter { it.pairedId == null || paired.none { p -> p.id == it.pairedId } }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(vertical = 8.dp)) {
         Text(
@@ -345,15 +406,26 @@ private fun DeviceList(
             )
         }
         paired.forEach { device ->
+            val radio = radioOf[device.id]
             DeviceRow(
                 device.name,
-                stringResource(if (device.id in listeningIds) R.string.cast_device_listening else R.string.cast_device_paired),
+                when {
+                    radio != null -> stringResource(R.string.cast_device_listening_radio, radio)
+                    device.id in listeningIds -> stringResource(R.string.cast_device_listening)
+                    else -> stringResource(R.string.cast_device_paired)
+                },
                 listening = device.id in listeningIds,
                 onForget = { onForget(device.id) },
             )
         }
         guests.forEach { guest ->
-            DeviceRow(guest.name, stringResource(R.string.cast_device_listening_open), listening = true, onForget = null)
+            DeviceRow(
+                guest.name,
+                guest.radio?.let { stringResource(R.string.cast_device_listening_radio_open, it) }
+                    ?: stringResource(R.string.cast_device_listening_open),
+                listening = true,
+                onForget = null,
+            )
         }
         if (paired.isNotEmpty()) {
             TextButton(onClick = onForgetAll, modifier = Modifier.padding(horizontal = 8.dp).testTag("castForgetAll")) {
@@ -464,6 +536,7 @@ private fun Listening(
     heardMs: () -> Long,
     onStop: () -> Unit,
     onSwitch: () -> Unit,
+    onTune: (Int) -> Unit,
     pulseSource: PulseSource,
 ) {
     // What is heard here can't be captured in a screenshot or screen recording.
@@ -480,5 +553,8 @@ private fun Listening(
         onStop = onStop,
         onSwitch = onSwitch,
         pulseSource = pulseSource,
+        radios = ui.radios,
+        channel = ui.tuning ?: ui.channel,
+        onTune = onTune,
     )
 }

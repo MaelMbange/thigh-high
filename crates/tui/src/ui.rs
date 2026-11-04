@@ -253,6 +253,23 @@ fn draw_cast(frame: &mut Frame, app: &mut App) {
                 Span::from(listen.name.clone()).fg(colors.secondary).bold(),
                 Span::from(if listen.playing { "" } else { "  (paused)" }).dark_gray(),
             ])];
+            if !listen.radios.is_empty() {
+                // Live, then the broadcaster's radios: the one heard stands out.
+                let channels = std::iter::once((thigh_high_cast::LIVE, "Live".to_string()))
+                    .chain(listen.radios.iter().map(|r| (r.id, r.name.clone())));
+                let mut spans = Vec::new();
+                for (id, name) in channels {
+                    if !spans.is_empty() {
+                        spans.push(Span::from(" · ").dark_gray());
+                    }
+                    spans.push(if id == listen.channel {
+                        Span::from(format!("[{name}]")).fg(colors.primary).bold()
+                    } else {
+                        Span::from(name).dark_gray()
+                    });
+                }
+                lines.push(Line::from(spans));
+            }
             match &listen.track {
                 Some(track) => {
                     lines.push(Line::from(track.title.clone()).fg(colors.primary).bold());
@@ -779,6 +796,7 @@ fn help_line(app: &App, colors: Colors) -> Line<'static> {
             Some(Cast::Connecting { .. }) => &[("Esc", "cancel")],
             Some(Cast::AskingCode(_)) => &[("0-9", "code"), ("Enter", "send"), ("Esc", "cancel")],
             Some(Cast::Listening(_)) => &[
+                ("Tab", "radio"),
                 ("Space", "pause"),
                 ("+/-", "vol"),
                 ("x", "stop listening"),

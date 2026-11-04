@@ -216,4 +216,13 @@
     <string name="cast_ended">La diffusion est terminée.</string>
     <string name="cast_lost">La connexion a été perdue.</string>
     <string name="cast_cant_start">Impossible de démarrer la diffusion.</string>
+    <string name="cast_needs_code_again">Cet appareil demande à nouveau le code : arrête l\'écoute puis reconnecte-toi.</string>
+    <string name="cast_radios_title">Radios</string>
+    <string name="cast_radios_hint">Chaque playlist cochée devient une radio : tes auditeurs peuvent l\'écouter à part, en aléatoire, pendant que tu écoutes autre chose. Elle ne tourne que quand quelqu\'un l\'écoute.</string>
+    <string name="cast_radios_none">Crée une playlist pour pouvoir la diffuser comme radio.</string>
+    <string name="cast_radio_tracks">%1$d morceaux</string>
+    <string name="cast_radio_listeners">%1$d morceaux · %2$d à l\'écoute</string>
+    <string name="cast_live">En direct</string>
+    <string name="cast_device_listening_radio">À l\'écoute de « %1$s »</string>
+    <string name="cast_device_listening_radio_open">À l\'écoute de « %1$s » (ouvert)</string>
 </resources>

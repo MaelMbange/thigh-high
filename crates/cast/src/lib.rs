@@ -24,7 +24,7 @@ pub mod discovery;
 pub use client::{Connected, Event, Pending, Session};
 pub use identity::{Identity, Paired};
 pub use server::Server;
-pub use wire::TrackInfo;
+pub use wire::{LIVE, Radio, TrackInfo};
 
 /// The DNS-SD service type both apps announce and browse.
 pub const SERVICE_TYPE: &str = "_thighhigh._tcp";

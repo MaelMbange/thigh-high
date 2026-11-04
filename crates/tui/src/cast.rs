@@ -19,7 +19,7 @@ use rodio::{ChannelCount, SampleRate, Source};
 use thigh_high_cast::client::{self, Closer, Connected, Error, Event, Pending};
 use thigh_high_cast::discovery::{Announcement, Browser, Found};
 use thigh_high_cast::lyrics::Lyrics;
-use thigh_high_cast::{Server, TrackInfo};
+use thigh_high_cast::{LIVE, Radio, Server, TrackInfo};
 
 use crate::app::AppEvent;
 use crate::cover;
@@ -96,6 +96,8 @@ pub enum Cast {
         closer: Option<Closer>,
         /// Shown again on the code prompt (a wrong code reconnects).
         error: Option<String>,
+        /// What to hear: live or one of its radios.
+        channel: u32,
     },
     AskingCode(AskCode),
     Listening(Listen),
@@ -200,6 +202,7 @@ pub struct AskCode {
     pub found: Found,
     pub input: String,
     pub error: Option<String>,
+    pub channel: u32,
     pending: Option<Box<Pending>>,
 }
 
@@ -214,12 +217,31 @@ pub struct Listen {
     pub track: Option<TrackInfo>,
     pub lyrics: Option<Lyrics>,
     pub playing: bool,
+    /// The device, to connect again for another channel.
+    pub found: Found,
+    /// The channel heard: [`LIVE`] or one of `radios`.
+    pub channel: u32,
+    pub radios: Vec<Radio>,
+    /// Tells this session's events from those of an earlier one.
+    pub session: u64,
     /// Position in the track of the audio being heard.
     heard: Arc<AtomicU64>,
     closer: Closer,
 }
 
+/// Numbers the listening sessions (see [`Listen::session`]).
+static SESSIONS: AtomicU64 = AtomicU64::new(0);
+
 impl Listen {
+    /// The channel `step` places away in [live, radios…], wrapping around.
+    pub fn channel_after(&self, step: isize) -> u32 {
+        let all: Vec<u32> = std::iter::once(LIVE)
+            .chain(self.radios.iter().map(|r| r.id))
+            .collect();
+        let here = all.iter().position(|&c| c == self.channel).unwrap_or(0) as isize;
+        all[(here + step).rem_euclid(all.len() as isize) as usize]
+    }
+
     pub fn heard_ms(&self) -> u64 {
         self.heard.load(Ordering::Relaxed)
     }
@@ -233,17 +255,20 @@ impl Listen {
 pub enum CastEvent {
     Connected(Box<Result<Connected, Error>>),
     Paired(Box<Result<client::Session, Error>>),
-    Track(TrackInfo),
-    State(bool),
+    /// The rest come from the listening session numbered first.
+    Track(u64, TrackInfo),
+    State(u64, bool),
+    /// The channel heard and the radios on offer.
+    Channels(u64, u32, Vec<Radio>),
     /// The broadcast ended (None) or the connection was lost.
-    Ended(Option<String>),
+    Ended(u64, Option<String>),
 }
 
 /// Connects in the background (it can take seconds).
-pub fn connect(found: &Found, events: Sender<AppEvent>, error: Option<String>) -> Cast {
+pub fn connect(found: &Found, events: Sender<AppEvent>, error: Option<String>, channel: u32) -> Cast {
     let addr: SocketAddr = found.addr;
     thread::spawn(move || {
-        let result = client::connect(&data_dir(), addr, &device_name());
+        let result = client::connect(&data_dir(), addr, &device_name(), channel);
         let _ = events.send(AppEvent::Cast(CastEvent::Connected(Box::new(result))));
     });
     Cast::Connecting {
@@ -251,15 +276,23 @@ pub fn connect(found: &Found, events: Sender<AppEvent>, error: Option<String>) -
         found: found.clone(),
         closer: None,
         error,
+        channel,
     }
 }
 
-pub fn ask_code(name: String, found: Found, pending: Pending, error: Option<String>) -> Cast {
+pub fn ask_code(
+    name: String,
+    found: Found,
+    pending: Pending,
+    error: Option<String>,
+    channel: u32,
+) -> Cast {
     Cast::AskingCode(AskCode {
         name,
         found,
         input: String::new(),
         error,
+        channel,
         pending: Some(Box::new(pending)),
     })
 }
@@ -279,6 +312,8 @@ pub fn submit_code(ask: &mut AskCode, events: Sender<AppEvent>) -> Option<Closer
 /// Starts receiving a joined broadcast, converted to `output_rate`.
 pub fn listen(
     session: client::Session,
+    found: Found,
+    channel: u32,
     output_rate: u32,
     tap: Tap,
     events: Sender<AppEvent>,
@@ -287,7 +322,8 @@ pub fn listen(
     let name = session.name().to_string();
     let heard = Arc::new(AtomicU64::new(0));
     let (audio, chunks) = mpsc::sync_channel(64);
-    thread::spawn(move || receive(session, output_rate, audio, events));
+    let number = SESSIONS.fetch_add(1, Ordering::Relaxed);
+    thread::spawn(move || receive(session, number, output_rate, audio, events));
     let source = LiveSource {
         chunks,
         queue: VecDeque::new(),
@@ -304,6 +340,10 @@ pub fn listen(
             track: None,
             lyrics: None,
             playing: true,
+            found,
+            channel,
+            radios: Vec::new(),
+            session: number,
             heard,
             closer,
         },
@@ -313,6 +353,7 @@ pub fn listen(
 
 fn receive(
     mut session: client::Session,
+    number: u64,
     output_rate: u32,
     audio: SyncSender<(u64, Vec<f32>)>,
     events: Sender<AppEvent>,
@@ -333,14 +374,17 @@ fn receive(
                 // Full only when playback stalls (paused): drop rather than lag.
                 let _ = audio.try_send((pos_ms, samples));
             }
-            Ok(Event::Track(track)) => send(CastEvent::Track(track)),
-            Ok(Event::State { playing, .. }) => send(CastEvent::State(playing)),
+            Ok(Event::Track(track)) => send(CastEvent::Track(number, track)),
+            Ok(Event::State { playing, .. }) => send(CastEvent::State(number, playing)),
+            Ok(Event::Channels { current, radios }) => {
+                send(CastEvent::Channels(number, current, radios))
+            }
             Ok(Event::Ended) => {
-                send(CastEvent::Ended(None));
+                send(CastEvent::Ended(number, None));
                 return;
             }
             Err(err) => {
-                send(CastEvent::Ended(Some(err.to_string())));
+                send(CastEvent::Ended(number, Some(err.to_string())));
                 return;
             }
         }
@@ -507,11 +551,19 @@ mod tests {
         });
         server.set_position(5_000, true);
         let addr = SocketAddr::from(([127, 0, 0, 1], server.port()));
-        let Ok(Connected::Ready(session)) = client::connect(&dir.join("me"), addr, "Me") else {
+        let Ok(Connected::Ready(session)) = client::connect(&dir.join("me"), addr, "Me", LIVE) else {
             panic!("could not join");
         };
         let (events, app_events) = mpsc::channel();
-        let (listen, mut source) = listen(session, 48_000, Tap::new(48_000), events).unwrap();
+        let found = Found {
+            name: "PC".into(),
+            addr,
+            id: server.short_id(),
+            open: true,
+            compatible: true,
+        };
+        let (listen, mut source) =
+            listen(session, found, LIVE, 48_000, Tap::new(48_000), events).unwrap();
         assert_eq!(listen.name, "PC");
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while server.listeners().is_empty() {
@@ -539,7 +591,7 @@ mod tests {
         let titles: Vec<String> = app_events
             .try_iter()
             .filter_map(|e| match e {
-                AppEvent::Cast(CastEvent::Track(t)) => Some(t.title),
+                AppEvent::Cast(CastEvent::Track(_, t)) => Some(t.title),
                 _ => None,
             })
             .collect();

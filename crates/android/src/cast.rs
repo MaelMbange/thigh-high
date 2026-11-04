@@ -9,9 +9,9 @@ use std::sync::Mutex;
 
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JObject, JShortArray, JString};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jbyteArray, jint, jlong, jstring};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jbyteArray, jint, jintArray, jlong, jstring};
 use thigh_high_cast::client::{self, Closer, Connected, Event, Pending, Session};
-use thigh_high_cast::{Server, TrackInfo};
+use thigh_high_cast::{Radio, Server, TrackInfo};
 
 fn throw(env: &mut JNIEnv, message: impl AsRef<str>) {
     let _ = env.throw_new("java/lang/RuntimeException", message.as_ref());
@@ -127,7 +127,8 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     unsafe { server(handle) }.set_open(open == JNI_TRUE);
 }
 
-/// The devices listening, one per line: paired id (empty if none), a tab, the name.
+/// The devices listening, one per line: paired id (empty if none), a tab,
+/// the channel heard (0 for live), a tab, the name.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverListeners<'l>(
     mut env: JNIEnv<'l>,
@@ -137,9 +138,9 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     let lines: Vec<String> = unsafe { server(handle) }
         .listening()
         .into_iter()
-        .map(|(id, name)| {
+        .map(|(id, name, channel)| {
             format!(
-                "{}\t{}",
+                "{}\t{channel}\t{}",
                 id.unwrap_or_default(),
                 name.replace(['\t', '\n'], " ")
             )
@@ -195,12 +196,62 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     }
 }
 
+/// The radios on offer, one per line: id (not 0), a tab, the name.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverSetRadios<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+    lines: JString<'l>,
+) {
+    match string(&mut env, &lines) {
+        Ok(lines) => {
+            let radios: Vec<Radio> = lines
+                .lines()
+                .filter_map(|line| {
+                    let (id, name) = line.split_once('\t')?;
+                    Some(Radio {
+                        id: id.parse().ok()?,
+                        name: name.to_string(),
+                    })
+                })
+                .collect();
+            unsafe { server(handle) }.set_radios(&radios);
+        }
+        Err(message) => throw(&mut env, message),
+    }
+}
+
+/// The radios someone listens to now.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverRadiosListened<
+    'l,
+>(
+    env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+) -> jintArray {
+    let ids: Vec<jint> = unsafe { server(handle) }
+        .radios_listened()
+        .into_iter()
+        .map(|id| id as jint)
+        .collect();
+    match env.new_int_array(ids.len() as i32) {
+        Ok(array) => {
+            let _ = env.set_int_array_region(&array, 0, &ids);
+            array.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
 pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverSetTrack<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass<'l>,
     handle: jlong,
+    channel: jint,
     title: JString<'l>,
     artist: JString<'l>,
     album: JString<'l>,
@@ -224,7 +275,7 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
         })
     })();
     match result {
-        Ok(track) => unsafe { server(handle) }.set_track(track),
+        Ok(track) => unsafe { server(handle) }.set_track_on(channel as u32, track),
         Err(message) => throw(&mut env, message),
     }
 }
@@ -234,10 +285,15 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     _env: JNIEnv,
     _class: JClass,
     handle: jlong,
+    channel: jint,
     pos_ms: jlong,
     playing: jboolean,
 ) {
-    unsafe { server(handle) }.set_position(pos_ms.max(0) as u64, playing == JNI_TRUE);
+    unsafe { server(handle) }.set_position_on(
+        channel as u32,
+        pos_ms.max(0) as u64,
+        playing == JNI_TRUE,
+    );
 }
 
 /// PCM as the player outputs it: 16-bit or float, little-endian, interleaved.
@@ -246,6 +302,7 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     env: JNIEnv<'l>,
     _class: JClass<'l>,
     handle: jlong,
+    channel: jint,
     bytes: JByteArray<'l>,
     length: jint,
     rate: jint,
@@ -265,14 +322,14 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
             .chunks_exact(4)
             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
             .collect();
-        server.push_f32(&samples, channels, rate as u32);
+        server.push_f32_on(channel as u32, &samples, channels, rate as u32);
     } else {
         let raw: Vec<u8> = bytes.collect();
         let samples: Vec<i16> = raw
             .chunks_exact(2)
             .map(|b| i16::from_le_bytes([b[0], b[1]]))
             .collect();
-        server.push_i16(&samples, channels, rate as u32);
+        server.push_i16_on(channel as u32, &samples, channels, rate as u32);
     }
 }
 
@@ -292,6 +349,9 @@ struct Received {
     rate: u32,
     playing: bool,
     error: String,
+    /// The channel heard, and the radios on offer.
+    channel: u32,
+    radios: Vec<Radio>,
 }
 
 struct Client {
@@ -335,6 +395,7 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
     host: JString<'l>,
     port: jint,
     name: JString<'l>,
+    channel: jint,
 ) -> jlong {
     let result = (|| -> Result<Client, String> {
         let dir = PathBuf::from(string(&mut env, &dir)?);
@@ -343,7 +404,7 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
             .map_err(|_| "io|bad address".to_string())?;
         let name = string(&mut env, &name)?;
         let addr = SocketAddr::new(host, port as u16);
-        match client::connect(&dir, addr, &name).map_err(|e| error_text(&e))? {
+        match client::connect(&dir, addr, &name, channel as u32).map_err(|e| error_text(&e))? {
             Connected::Ready(session) => {
                 let closer = session.closer().ok();
                 let broadcaster = session.name().to_string();
@@ -433,9 +494,10 @@ pub const ENDED: jint = -1;
 pub const TRACK: jint = -2;
 pub const STATE: jint = -3;
 pub const FAILED: jint = -4;
+pub const CHANNELS: jint = -5;
 
 /// Waits for the next message. Returns the number of 16-bit stereo samples
-/// written to `out`, or one of ENDED, TRACK, STATE, FAILED.
+/// written to `out`, or one of ENDED, TRACK, STATE, FAILED, CHANNELS.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clientRead<'l>(
     env: JNIEnv<'l>,
@@ -477,6 +539,11 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
                 received.playing = playing;
                 received.pos_ms = pos_ms;
                 STATE
+            }
+            Ok(Event::Channels { current, radios }) => {
+                received.channel = current;
+                received.radios = radios;
+                CHANNELS
             }
             Ok(Event::Ended) => {
                 *slot = Slot::Closed;
@@ -535,6 +602,26 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
         .error
         .clone();
     new_string(&mut env, &error)
+}
+
+/// The channel heard on the first line, then the radios on offer, one per
+/// line: id, a tab, the name.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clientChannels<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+) -> jstring {
+    let text = {
+        let received = unsafe { client(handle) }.received.lock().unwrap();
+        let mut text = received.channel.to_string();
+        for radio in &received.radios {
+            text.push('\n');
+            text.push_str(&format!("{}\t{}", radio.id, radio.name.replace(['\t', '\n'], " ")));
+        }
+        text
+    };
+    new_string(&mut env, &text)
 }
 
 /// The track: title, artist, album, one per line, then the duration in ms.

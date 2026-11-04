@@ -873,7 +873,12 @@ impl App {
                                 Some(format!("{} runs another version of thigh-high", found.name));
                             return;
                         }
-                        self.cast = Some(cast::connect(&found, self.tx.clone(), None));
+                        self.cast = Some(cast::connect(
+                            &found,
+                            self.tx.clone(),
+                            None,
+                            thigh_high_cast::LIVE,
+                        ));
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('q') => self.cast = Some(Cast::Menu { listen: true }),
@@ -900,6 +905,7 @@ impl App {
                         found,
                         closer,
                         error: None,
+                        channel: ask.channel,
                     });
                 }
                 KeyCode::Esc => self.cast = Some(Cast::Menu { listen: true }),
@@ -922,6 +928,19 @@ impl App {
                 }
                 KeyCode::Char('+') | KeyCode::Char('=') => self.change_volume(0.05),
                 KeyCode::Char('-') => self.change_volume(-0.05),
+                // Another channel of the same device: live or one of its radios.
+                KeyCode::Tab | KeyCode::Right | KeyCode::BackTab | KeyCode::Left
+                    if !listen.radios.is_empty() =>
+                {
+                    let step = if matches!(key.code, KeyCode::Tab | KeyCode::Right) { 1 } else { -1 };
+                    let channel = listen.channel_after(step);
+                    listen.stop();
+                    if let Some(player) = &self.player {
+                        player.stop();
+                    }
+                    let found = listen.found.clone();
+                    self.cast = Some(cast::connect(&found, self.tx.clone(), None, channel));
+                }
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') => self.close_cast_dialog(),
                 _ => {}
             },
@@ -959,16 +978,22 @@ impl App {
         match event {
             CastEvent::Connected(result) => {
                 let Some(Cast::Connecting {
-                    name, found, error, ..
+                    name,
+                    found,
+                    error,
+                    channel,
+                    ..
                 }) = self.cast.take()
                 else {
                     // Cancelled meanwhile: the connection is simply dropped.
                     return;
                 };
                 self.cast = Some(match *result {
-                    Ok(Connected::Ready(session)) => return self.start_listening(session),
+                    Ok(Connected::Ready(session)) => {
+                        return self.start_listening(session, found, channel);
+                    }
                     Ok(Connected::NeedsCode(pending)) => {
-                        cast::ask_code(name, found, pending, error)
+                        cast::ask_code(name, found, pending, error, channel)
                     }
                     Err(err) => {
                         let mut browse = Browse::start(None);
@@ -978,11 +1003,17 @@ impl App {
                 });
             }
             CastEvent::Paired(result) => {
-                let Some(Cast::Connecting { name, found, .. }) = self.cast.take() else {
+                let Some(Cast::Connecting {
+                    name,
+                    found,
+                    channel,
+                    ..
+                }) = self.cast.take()
+                else {
                     return;
                 };
                 match *result {
-                    Ok(session) => self.start_listening(session),
+                    Ok(session) => self.start_listening(session, found, channel),
                     Err(
                         err @ (thigh_high_cast::client::Error::WrongCode
                         | thigh_high_cast::client::Error::CodeChanged),
@@ -994,8 +1025,12 @@ impl App {
                             }
                             _ => "Wrong code, try again",
                         };
-                        self.cast =
-                            Some(cast::connect(&found, self.tx.clone(), Some(message.into())));
+                        self.cast = Some(cast::connect(
+                            &found,
+                            self.tx.clone(),
+                            Some(message.into()),
+                            channel,
+                        ));
                     }
                     Err(err) => {
                         let mut browse = Browse::start(None);
@@ -1004,8 +1039,10 @@ impl App {
                     }
                 }
             }
-            CastEvent::Track(track) => {
-                if let Some(Cast::Listening(listen)) = &mut self.cast {
+            CastEvent::Track(session, track) => {
+                if let Some(Cast::Listening(listen)) = &mut self.cast
+                    && listen.session == session
+                {
                     self.palette = track
                         .cover
                         .as_deref()
@@ -1019,13 +1056,25 @@ impl App {
                     listen.track = Some(track);
                 }
             }
-            CastEvent::State(playing) => {
-                if let Some(Cast::Listening(listen)) = &mut self.cast {
+            CastEvent::State(session, playing) => {
+                if let Some(Cast::Listening(listen)) = &mut self.cast
+                    && listen.session == session
+                {
                     listen.playing = playing;
                 }
             }
-            CastEvent::Ended(reason) => {
-                if let Some(Cast::Listening(listen)) = &self.cast {
+            CastEvent::Channels(session, current, radios) => {
+                if let Some(Cast::Listening(listen)) = &mut self.cast
+                    && listen.session == session
+                {
+                    listen.channel = current;
+                    listen.radios = radios;
+                }
+            }
+            CastEvent::Ended(session, reason) => {
+                if let Some(Cast::Listening(listen)) = &self.cast
+                    && listen.session == session
+                {
                     self.status = match reason {
                         None => format!("{} stopped broadcasting", listen.name),
                         Some(err) => format!("Lost {}: {err}", listen.name),
@@ -1043,7 +1092,12 @@ impl App {
         }
     }
 
-    fn start_listening(&mut self, session: thigh_high_cast::Session) {
+    fn start_listening(
+        &mut self,
+        session: thigh_high_cast::Session,
+        found: thigh_high_cast::discovery::Found,
+        channel: u32,
+    ) {
         if self.player.is_none() {
             self.status = "No audio output available".into();
             self.cast = None;
@@ -1054,6 +1108,8 @@ impl App {
         let Some(player) = &self.player else { return };
         match cast::listen(
             session,
+            found,
+            channel,
             player.sample_rate(),
             player.tap().clone(),
             self.tx.clone(),

@@ -7,7 +7,10 @@
 use std::io::{self, Read, Write};
 
 /// Bumped when the messages change in a way older apps can't read.
-pub const PROTOCOL: u16 = 1;
+pub const PROTOCOL: u16 = 2;
+
+/// The channel of what the broadcaster itself plays; radios have other ids.
+pub const LIVE: u32 = 0;
 
 /// Larger messages are refused (a cover is resized well below this).
 const MAX_MESSAGE: usize = 2 * 1024 * 1024;
@@ -33,6 +36,8 @@ pub enum Message {
         name: String,
         /// Given at a previous pairing, so the code isn't asked again.
         token: Option<[u8; 32]>,
+        /// What to listen to: [`LIVE`] or one of the radios.
+        channel: u32,
     },
     Pair(Vec<u8>),
     Confirm([u8; 32]),
@@ -63,6 +68,19 @@ pub enum Message {
     },
     /// The broadcast is over.
     Bye,
+    /// The radios on offer, besides [`LIVE`], and the channel this listener
+    /// hears (a radio that is taken off sends its listeners back to live).
+    Channels {
+        current: u32,
+        radios: Vec<Radio>,
+    },
+}
+
+/// A radio: one of the broadcaster's playlists, played on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Radio {
+    pub id: u32,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +204,7 @@ impl Message {
             Message::Audio { .. } => 21,
             Message::State { .. } => 22,
             Message::Bye => 23,
+            Message::Channels { .. } => 24,
         }
     }
 
@@ -197,10 +216,12 @@ impl Message {
                 protocol,
                 name,
                 token,
+                channel,
             } => {
                 o.u16(*protocol);
                 o.str(name);
                 o.opt_bytes(token.as_ref().map(|t| &t[..]));
+                o.u32(*channel);
             }
             Message::Pair(spake) => o.bytes(spake),
             Message::Confirm(mac) => o.0.extend_from_slice(mac),
@@ -238,6 +259,14 @@ impl Message {
                 o.u8(*playing as u8);
                 o.u64(*pos_ms);
             }
+            Message::Channels { current, radios } => {
+                o.u32(*current);
+                o.u32(radios.len() as u32);
+                for radio in radios {
+                    o.u32(radio.id);
+                    o.str(&radio.name);
+                }
+            }
         }
         let mut framed = Vec::with_capacity(o.0.len() + 5);
         framed.push(self.kind());
@@ -256,6 +285,7 @@ impl Message {
                     Some(t) => Some(t.try_into().map_err(|_| invalid("bad token"))?),
                     None => None,
                 },
+                channel: i.u32()?,
             },
             2 => Message::Pair(i.bytes()?),
             3 => Message::Confirm(i.arr32()?),
@@ -301,6 +331,18 @@ impl Message {
                 pos_ms: i.u64()?,
             },
             23 => Message::Bye,
+            24 => {
+                let current = i.u32()?;
+                let count = i.u32()? as usize;
+                let mut radios = Vec::with_capacity(count.min(256));
+                for _ in 0..count {
+                    radios.push(Radio {
+                        id: i.u32()?,
+                        name: i.str()?,
+                    });
+                }
+                Message::Channels { current, radios }
+            }
             _ => return Err(invalid("unknown message")),
         };
         Ok(message)
@@ -335,6 +377,14 @@ mod tests {
                 protocol: PROTOCOL,
                 name: "Téléphone".into(),
                 token: Some([7; 32]),
+                channel: 3,
+            },
+            Message::Channels {
+                current: 3,
+                radios: vec![Radio {
+                    id: 3,
+                    name: "Été".into(),
+                }],
             },
             Message::Accepted {
                 name: "PC".into(),

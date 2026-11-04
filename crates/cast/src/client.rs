@@ -12,7 +12,7 @@ use rustls::{ClientConnection, StreamOwned};
 
 use crate::identity::{self, KnownBroadcasters};
 use crate::pairing;
-use crate::wire::{self, Message, PROTOCOL, Reject, TrackInfo};
+use crate::wire::{self, Message, PROTOCOL, Radio, Reject, TrackInfo};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// The broadcaster sends something at least every 2 s.
@@ -83,8 +83,9 @@ pub enum Connected {
     NeedsCode(Pending),
 }
 
-/// Connects to a broadcaster. `dir` holds the tokens of earlier pairings.
-pub fn connect(dir: &Path, addr: SocketAddr, name: &str) -> Result<Connected, Error> {
+/// Connects to a broadcaster, to hear `channel` ([`crate::wire::LIVE`] or
+/// one of its radios). `dir` holds the tokens of earlier pairings.
+pub fn connect(dir: &Path, addr: SocketAddr, name: &str, channel: u32) -> Result<Connected, Error> {
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
@@ -111,6 +112,7 @@ pub fn connect(dir: &Path, addr: SocketAddr, name: &str) -> Result<Connected, Er
             protocol: PROTOCOL,
             name: name.to_string(),
             token,
+            channel,
         },
     )?;
     match wire::read(&mut tls)? {
@@ -202,6 +204,9 @@ pub enum Event {
         playing: bool,
         pos_ms: u64,
     },
+    /// The radios on offer and the channel heard: sent first, then on
+    /// every change.
+    Channels { current: u32, radios: Vec<Radio> },
     /// The broadcast ended.
     Ended,
 }
@@ -244,6 +249,7 @@ impl Session {
                 samples,
             },
             Message::State { playing, pos_ms } => Event::State { playing, pos_ms },
+            Message::Channels { current, radios } => Event::Channels { current, radios },
             Message::Bye => Event::Ended,
             _ => return Err(Error::Protocol),
         })

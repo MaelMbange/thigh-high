@@ -582,6 +582,7 @@ class MainActivity : ComponentActivity() {
         pulseSource: io.github.maelmbange.thighhigh.playback.PulseSource,
     ) {
         val cast = viewModel.cast
+        val radios by cast.radioOptions.collectAsStateWithLifecycle()
         AnimatedVisibility(
             visible = open,
             enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(200)),
@@ -624,6 +625,9 @@ class MainActivity : ComponentActivity() {
                 onSwitchChannel = { cast.clearNotice(); cast.switchChannel() },
                 onBack = cast::stopBrowsing,
                 pulseSource = pulseSource,
+                radios = radios,
+                onSetRadio = cast::setRadio,
+                onTune = { cast.clearNotice(); cast.tune(it) },
             )
         }
     }

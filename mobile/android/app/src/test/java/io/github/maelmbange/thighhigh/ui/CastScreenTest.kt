@@ -20,6 +20,8 @@ import io.github.maelmbange.thighhigh.cast.CastTrack
 import io.github.maelmbange.thighhigh.cast.CastUi
 import io.github.maelmbange.thighhigh.cast.Found
 import io.github.maelmbange.thighhigh.cast.PairedDevice
+import io.github.maelmbange.thighhigh.cast.RadioOption
+import io.github.maelmbange.thighhigh.cast.CastChannel
 import io.github.maelmbange.thighhigh.cast.toText
 import io.github.maelmbange.thighhigh.lyrics.LyricLine
 import io.github.maelmbange.thighhigh.lyrics.Lyrics
@@ -38,6 +40,7 @@ class CastScreenTest {
 
     private val calls = mutableListOf<String>()
     private var ui by mutableStateOf<CastUi>(CastUi.Idle)
+    private var radios by mutableStateOf<List<RadioOption>>(emptyList())
 
     private fun show(notice: CastNotice? = null) {
         rule.mainClock.autoAdvance = false
@@ -62,9 +65,41 @@ class CastScreenTest {
                 onStopListening = { calls += "unlisten" },
                 onSwitchChannel = { calls += "switch" },
                 onBack = { calls += "back" },
+                radios = radios,
+                onSetRadio = { id, on -> calls += "radio:$id:$on" },
+                onTune = { calls += "tune:$it" },
             )
         }
         rule.mainClock.advanceTimeBy(1_000)
+    }
+
+    @Test
+    fun playlistsAreOfferedAsRadios() {
+        ui = CastUi.Broadcasting("Pixel", open = true, code = "123456", listeners = listOf(CastListener("p1", "Tablette", radio = "Rock")), paired = listOf(PairedDevice("p1", "Tablette")), visible = true)
+        radios = listOf(RadioOption("a", "Rock", 12, on = true), RadioOption("b", "Vide", 0, on = false), RadioOption("c", "Calme", 3, on = false))
+        show()
+        rule.onNodeWithText("12 morceaux · 1 à l'écoute").assertExists()
+        rule.onNodeWithText("À l'écoute de « Rock »").assertExists()
+        rule.onAllNodesWithTag("castRadio")[1].assertIsNotEnabled()
+        rule.onNodeWithText("Calme").performClick()
+        rule.onAllNodesWithTag("castRadio")[0].performClick()
+        assertEquals(listOf("radio:c:true", "radio:a:false"), calls)
+    }
+
+    @Test
+    fun listenerPicksAChannel() {
+        ui = CastUi.Listening("PC", track = null, playing = true, radios = listOf(CastChannel(1, "Rock"), CastChannel(2, "Calme")), channel = 1)
+        show()
+        rule.onNodeWithText("En direct").performClick()
+        rule.onNodeWithText("Calme").performClick()
+        assertEquals(listOf("tune:0", "tune:2"), calls)
+    }
+
+    @Test
+    fun noRadiosNoChannelRow() {
+        ui = CastUi.Listening("PC", track = null, playing = true)
+        show()
+        rule.onNodeWithTag("castChannels").assertDoesNotExist()
     }
 
     @Test

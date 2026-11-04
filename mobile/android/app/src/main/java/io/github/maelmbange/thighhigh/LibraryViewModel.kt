@@ -308,6 +308,18 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
                 cast.setTrack(tracks?.firstOrNull { it.id == id }, cover.bitmap)
             }
         }
+        // The playlists (favorites first) can be broadcast as radios.
+        viewModelScope.launch {
+            val favoritesName = getApplication<Application>().getString(io.github.maelmbange.thighhigh.R.string.favorites)
+            combine(playlists, favorites, _tracks) { lists, favs, tracks -> Triple(lists, favs, tracks.orEmpty()) }
+                .collect { (lists, favs, tracks) ->
+                    cast.setRadioSources(
+                        (listOf(favs.copy(name = favoritesName)) + lists).map {
+                            io.github.maelmbange.thighhigh.cast.RadioSource(it.id, it.name, it.tracks(tracks))
+                        },
+                    )
+                }
+        }
         // Playing our own music again ends listening to someone else's.
         viewModelScope.launch {
             playback.map { it.isPlaying }.distinctUntilChanged().collect { playing ->

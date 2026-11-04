@@ -9,6 +9,7 @@ import android.media.AudioTrack
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.lyrics.Lyrics
@@ -22,7 +23,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -58,13 +62,27 @@ data class CastTrack(
 )
 
 /** A device listening now; [pairedId] is its entry among [PairedDevice]s, null if it came in open. */
-data class CastListener(val pairedId: String?, val name: String)
+data class CastListener(
+    val pairedId: String?,
+    val name: String,
+    /** The radio it hears, or null for what this phone plays. */
+    val radio: String? = null,
+)
+
+/** A playlist that can be offered as a radio. */
+data class RadioSource(val playlistId: String, val name: String, val tracks: List<Track>)
+
+/** A playlist on the broadcast screen, with whether it is offered as a radio. */
+data class RadioOption(val playlistId: String, val name: String, val trackCount: Int, val on: Boolean)
+
+/** A channel of the broadcaster being heard: [id] is [CastNative.LIVE] or a radio. */
+data class CastChannel(val id: Int, val name: String)
 
 /** A listener that entered the code once and comes back without it. */
 data class PairedDevice(val id: String, val name: String)
 
 /** Something to tell the user once, as a short message. */
-enum class CastNotice { WrongCode, CodeChanged, Full, OtherVersion, Unreachable, Ended, Lost, CantStart }
+enum class CastNotice { WrongCode, CodeChanged, Full, OtherVersion, Unreachable, Ended, Lost, CantStart, NeedsCodeAgain }
 
 sealed interface CastUi {
     data object Idle : CastUi
@@ -82,7 +100,16 @@ sealed interface CastUi {
     data class Browsing(val found: List<Found>) : CastUi
     data class Connecting(val name: String) : CastUi
     data class AskingCode(val name: String, val error: CastNotice?) : CastUi
-    data class Listening(val name: String, val track: CastTrack?, val playing: Boolean) : CastUi
+    data class Listening(
+        val name: String,
+        val track: CastTrack?,
+        val playing: Boolean,
+        /** The broadcaster's radios (live aside), and the channel heard. */
+        val radios: List<CastChannel> = emptyList(),
+        val channel: Int = CastNative.LIVE,
+        /** Set while switching to that channel. */
+        val tuning: Int? = null,
+    ) : CastUi
 }
 
 /**
@@ -137,7 +164,7 @@ class CastController(
                 if (server == 0L || length == 0) return
                 if (pushBuffer.size < length) pushBuffer = ByteArray(length)
                 buffer.duplicate().get(pushBuffer, 0, length)
-                CastNative.serverPush(server, pushBuffer, length, rate, channels, float)
+                CastNative.serverPush(server, CastNative.LIVE, pushBuffer, length, rate, channels, float)
             }
         }
     }
@@ -175,12 +202,16 @@ class CastController(
             _ui.value = CastUi.Broadcasting(deviceName, open = open, code = CastNative.serverCode(handle), listeners = emptyList(), visible = true)
             announce(handle, open = open)
             setTrack(current, cover)
+            radioIds.clear()
+            offerRadios()
             broadcastJob = scope.launch {
+                var tick = 0
                 while (isActive) {
+                    if (tick++ % 4 == 0) runRadios()
                     // The tap gets the audio before the speaker's buffer: stamp
                     // it with where playback will be when it is heard.
                     synchronized(serverLock) {
-                        if (server != 0L) CastNative.serverSetPosition(server, position() + AudioTap.OUTPUT_LAG_MS, isPlaying())
+                        if (server != 0L) CastNative.serverSetPosition(server, CastNative.LIVE, position() + AudioTap.OUTPUT_LAG_MS, isPlaying())
                     }
                     _ui.update { ui ->
                         if (ui is CastUi.Broadcasting && server != 0L) ui.copy(
@@ -201,21 +232,129 @@ class CastController(
         trackJob?.cancel()
         trackJob = scope.launch(Dispatchers.IO) {
             if (track == null) return@launch
-            val jpeg = cover?.let(::smallJpeg)
-            fun send(lyrics: String?) = synchronized(serverLock) {
-                if (server != 0L) CastNative.serverSetTrack(
-                    server, track.title, track.artist, track.album,
-                    track.duration?.inWholeMilliseconds ?: 0L, jpeg, lyrics,
-                )
-            }
-            send(null)
-            val lyrics = try {
-                lyricsRepository.load(track).toText()
-            } catch (_: Exception) {
-                null
-            }
-            if (lyrics != null) send(lyrics)
+            sendTrack(CastNative.LIVE, track, cover)
         }
+    }
+
+    /** Title, cover, then the lyrics once found, to those hearing [channel]. */
+    private suspend fun sendTrack(channel: Int, track: Track, cover: Bitmap?) {
+        val jpeg = cover?.let(::smallJpeg)
+        fun send(lyrics: String?) = synchronized(serverLock) {
+            if (server != 0L) CastNative.serverSetTrack(
+                server, channel, track.title, track.artist, track.album,
+                track.duration?.inWholeMilliseconds ?: 0L, jpeg, lyrics,
+            )
+        }
+        send(null)
+        val lyrics = try {
+            lyricsRepository.load(track).toText()
+        } catch (_: Exception) {
+            null
+        }
+        if (lyrics != null) send(lyrics)
+    }
+
+    // -------------------------------------------------------------- Radios
+
+    private val prefs = app.getSharedPreferences("cast", Context.MODE_PRIVATE)
+    private val sources = MutableStateFlow<List<RadioSource>>(emptyList())
+    private val chosen = MutableStateFlow(prefs.getStringSet(RADIOS_KEY, null).orEmpty().toSet())
+
+    /** The playlists that can be offered as radios, and which ones are. */
+    val radioOptions: StateFlow<List<RadioOption>> = combine(sources, chosen) { list, on ->
+        list.map { RadioOption(it.playlistId, it.name, it.tracks.size, it.playlistId in on && it.tracks.isNotEmpty()) }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** The playlists and their tracks, kept up to date by the library. */
+    fun setRadioSources(list: List<RadioSource>) {
+        val changed = sources.value != list
+        sources.value = list
+        if (changed) offerRadios()
+    }
+
+    /** Offers a playlist as a radio, or takes it off (also before the start). */
+    fun setRadio(playlistId: String, on: Boolean) {
+        chosen.update { if (on) it + playlistId else it - playlistId }
+        prefs.edit().putStringSet(RADIOS_KEY, chosen.value).apply()
+        offerRadios()
+    }
+
+    /** The radio number of each playlist, for this broadcast. */
+    private val radioIds = HashMap<String, Int>()
+    /** Radios playing now, and since when nobody listens to each one. */
+    private val stations = HashMap<Int, RadioStation>()
+    private val idleSince = HashMap<Int, Long>()
+
+    private fun offered(): List<Pair<Int, RadioSource>> = sources.value
+        .filter { it.playlistId in chosen.value && it.tracks.isNotEmpty() }
+        .map { source -> radioIds.getOrPut(source.playlistId) { radioIds.size + 1 } to source }
+
+    private fun offerRadios() {
+        val handle = server.takeIf { it != 0L } ?: return
+        val radios = offered()
+        CastNative.serverSetRadios(handle, radios.joinToString("\n") { (id, source) -> "$id\t${source.name}" })
+        // A radio taken off, or whose playlist changed, starts afresh when listened to.
+        val wanted = radios.associate { (id, source) -> id to source.tracks }
+        stations.keys.filter { wanted[it] == null || wanted[it] != stationTracks[it] }.forEach(::stopStation)
+    }
+
+    private val stationTracks = HashMap<Int, List<Track>>()
+
+    /** Starts the radios someone listens to, stops those left alone for a while. */
+    private fun runRadios() {
+        val handle = server.takeIf { it != 0L } ?: return
+        val listened = CastNative.serverRadiosListened(handle).toSet()
+        val radios = offered().toMap()
+        val now = SystemClock.elapsedRealtime()
+        for (id in listened) {
+            idleSince.remove(id)
+            if (id in stations) continue
+            val source = radios[id] ?: continue
+            val station = RadioStation(app, id, source.tracks, radioSink)
+            stations[id] = station
+            stationTracks[id] = source.tracks
+            station.start()
+        }
+        for (id in stations.keys.toList()) {
+            if (id in listened) continue
+            val since = idleSince.getOrPut(id) { now }
+            // Kept a little: switching away and back doesn't restart it.
+            if (now - since > RADIO_IDLE_MS) stopStation(id)
+        }
+    }
+
+    private fun stopStation(id: Int) {
+        stations.remove(id)?.stop()
+        stationTracks.remove(id)
+        idleSince.remove(id)
+    }
+
+    private fun stopStations() {
+        stations.keys.toList().forEach(::stopStation)
+    }
+
+    private val radioSink = object : RadioStation.Sink {
+        private var buffers = HashMap<Int, ByteArray>()
+
+        override fun track(radio: Int, track: Track) {
+            scope.launch(Dispatchers.IO) {
+                val cover = try {
+                    app.contentResolver.loadThumbnail(track.uri, android.util.Size(COVER_SIZE, COVER_SIZE), null)
+                } catch (_: Exception) {
+                    null // no embedded cover
+                }
+                sendTrack(radio, track, cover)
+            }
+        }
+
+        override fun position(radio: Int, positionMs: Long) = synchronized(serverLock) {
+            if (server != 0L) CastNative.serverSetPosition(server, radio, positionMs, true)
+        }
+
+        override fun audio(radio: Int, bytes: ByteArray, length: Int, rate: Int, channels: Int, float: Boolean) =
+            synchronized(serverLock) {
+                if (server != 0L) CastNative.serverPush(server, radio, bytes, length, rate, channels, float)
+            }
     }
 
     fun setOpen(open: Boolean) {
@@ -236,10 +375,17 @@ class CastController(
             if (id.isEmpty()) null else PairedDevice(id, line.substringAfter('\t'))
         }
 
-    private fun listeners(handle: Long): List<CastListener> =
-        CastNative.serverListeners(handle).lines().filter { it.isNotEmpty() }.map { line ->
-            CastListener(line.substringBefore('\t').ifEmpty { null }, line.substringAfter('\t'))
+    private fun listeners(handle: Long): List<CastListener> {
+        val names = offered().associate { (id, source) -> id to source.name }
+        return CastNative.serverListeners(handle).lines().filter { it.isNotEmpty() }.map { line ->
+            val fields = line.split('\t', limit = 3)
+            CastListener(
+                pairedId = fields[0].ifEmpty { null },
+                name = fields.getOrElse(2) { "" },
+                radio = fields.getOrNull(1)?.toIntOrNull()?.let(names::get),
+            )
         }
+    }
 
     /** Every paired device must type the code again (those listening go, unless open). */
     fun forgetAllPaired() {
@@ -258,6 +404,7 @@ class CastController(
     fun stopBroadcast() {
         broadcastJob?.cancel()
         trackJob?.cancel()
+        stopStations()
         unannounce()
         AudioTap.castSink = null
         val handle = synchronized(serverLock) { server.also { server = 0L } }
@@ -378,11 +525,14 @@ class CastController(
         _ui.update { if (it is CastUi.Browsing) it.copy(found = found.values.sortedBy { f -> f.name.lowercase() }) else it }
     }
 
-    /** The connection waiting for its code, and the device it goes to. */
+    /** The connection waiting for its code, and the device and channel it goes to. */
     private var pending = 0L
     private var pendingTo: Found? = null
+    private var pendingChannel = CastNative.LIVE
+    /** The device heard, to tune to its other channels. */
+    private var listeningTo: Found? = null
 
-    fun connect(to: Found, error: CastNotice? = null) {
+    fun connect(to: Found, error: CastNotice? = null, channel: Int = CastNative.LIVE) {
         if (!to.compatible) {
             _notice.value = CastNotice.OtherVersion
             return
@@ -391,7 +541,7 @@ class CastController(
         _ui.value = CastUi.Connecting(to.name)
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { CastNative.clientConnect(dir, to.host, to.port, deviceName) }
+                runCatching { CastNative.clientConnect(dir, to.host, to.port, deviceName, channel) }
             }
             if (_ui.value !is CastUi.Connecting) {
                 // Cancelled meanwhile.
@@ -403,9 +553,10 @@ class CastController(
                     if (CastNative.clientNeedsCode(handle)) {
                         pending = handle
                         pendingTo = to
+                        pendingChannel = channel
                         _ui.value = CastUi.AskingCode(to.name, error)
                     } else {
-                        listen(handle)
+                        listen(handle, to, channel)
                     }
                 },
                 onFailure = { failed(it.message) },
@@ -424,14 +575,15 @@ class CastController(
                 CastNative.clientFree(handle)
                 return@launch
             }
+            val channel = pendingChannel
             result.fold(
-                onSuccess = { listen(handle) },
+                onSuccess = { listen(handle, to, channel) },
                 onFailure = { err ->
                     CastNative.clientFree(handle)
                     when (CastNative.errorKind(err.message)) {
                         // The connection is spent: connect again and ask again.
-                        "wrong_code" -> connect(to, CastNotice.WrongCode)
-                        "code_changed" -> connect(to, CastNotice.CodeChanged)
+                        "wrong_code" -> connect(to, CastNotice.WrongCode, channel)
+                        "code_changed" -> connect(to, CastNotice.CodeChanged, channel)
                         else -> failed(err.message)
                     }
                 },
@@ -481,14 +633,55 @@ class CastController(
         return (lastPosMs + (head - lastChunkStart) * 1000 / rate).coerceAtLeast(0)
     }
 
-    private fun listen(handle: Long) {
+    private var receiver: Thread? = null
+
+    private fun listen(handle: Long, to: Found, channel: Int) {
         session = handle
+        listeningTo = to
         stopping = false
         onListenStart()
         val name = CastNative.clientName(handle)
-        _ui.value = CastUi.Listening(name, track = null, playing = true)
+        // Switching channels keeps the list of radios meanwhile.
+        val radios = (_ui.value as? CastUi.Listening)?.radios.orEmpty()
+        _ui.value = CastUi.Listening(name, track = null, playing = true, radios = radios, channel = channel)
         AudioTap.setLive(true, lagMs = BUFFER_MS + 40)
-        Thread({ receive(handle, name) }, "cast-listen").start()
+        receiver = Thread({ receive(handle, name) }, "cast-listen").apply { start() }
+    }
+
+    /**
+     * Hears another channel of the same device: live or one of its radios.
+     * The current one plays on until the new connection is ready.
+     */
+    fun tune(channel: Int) {
+        val listening = _ui.value as? CastUi.Listening ?: return
+        val to = listeningTo ?: return
+        val old = session.takeIf { it != 0L } ?: return
+        if (listening.tuning != null || listening.channel == channel) return
+        _ui.update { if (it is CastUi.Listening) it.copy(tuning = channel) else it }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { CastNative.clientConnect(dir, to.host, to.port, deviceName, channel) }
+            }
+            val handle = result.getOrNull()
+            if (session != old) {
+                // Stopped meanwhile.
+                handle?.let { CastNative.clientClose(it); CastNative.clientFree(it) }
+                return@launch
+            }
+            if (handle == null || CastNative.clientNeedsCode(handle)) {
+                // No longer paired (or unreachable): this channel plays on.
+                handle?.let { CastNative.clientClose(it); CastNative.clientFree(it) }
+                _notice.value = if (handle == null) CastNotice.Unreachable else CastNotice.NeedsCodeAgain
+                _ui.update { if (it is CastUi.Listening) it.copy(tuning = null) else it }
+                return@launch
+            }
+            // The old session's thread now sees it is no longer the one heard.
+            session = handle
+            CastNative.clientClose(old)
+            val previous = receiver
+            withContext(Dispatchers.IO) { previous?.join(2_000) }
+            listen(handle, to, channel)
+        }
     }
 
     private fun receive(handle: Long, name: String) {
@@ -524,11 +717,22 @@ class CastController(
                     }
                     n == CastNative.TRACK -> {
                         val track = readTrack(handle)
-                        _ui.update { if (it is CastUi.Listening) it.copy(track = track) else it }
+                        if (session == handle) _ui.update { if (it is CastUi.Listening) it.copy(track = track) else it }
+                    }
+                    n == CastNative.CHANNELS -> {
+                        val lines = CastNative.clientChannels(handle).lines()
+                        val current = lines.firstOrNull()?.toIntOrNull() ?: CastNative.LIVE
+                        val radios = lines.drop(1).mapNotNull { line ->
+                            val id = line.substringBefore('\t').toIntOrNull() ?: return@mapNotNull null
+                            CastChannel(id, line.substringAfter('\t'))
+                        }
+                        if (session == handle) _ui.update {
+                            if (it is CastUi.Listening) it.copy(radios = radios, channel = current, tuning = null) else it
+                        }
                     }
                     n == CastNative.STATE -> {
                         val playing = CastNative.clientPlaying(handle)
-                        _ui.update { if (it is CastUi.Listening) it.copy(playing = playing) else it }
+                        if (session == handle) _ui.update { if (it is CastUi.Listening) it.copy(playing = playing) else it }
                     }
                     n == CastNative.ENDED -> {
                         reason = CastNotice.Ended
@@ -631,6 +835,9 @@ class CastController(
         const val PREBUFFER_MS = 400
         const val BUFFER_MS = 600
         const val COVER_SIZE = 320
+        const val RADIOS_KEY = "radios"
+        /** A radio nobody listens to plays on this long, then stops. */
+        const val RADIO_IDLE_MS = 15_000L
     }
 
     private fun smallJpeg(bitmap: Bitmap): ByteArray {
