@@ -95,7 +95,6 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.Repeat
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.playback.AudioTap
-import io.github.maelmbange.thighhigh.playback.Spectrum
 import io.github.maelmbange.thighhigh.playback.PulseDetector
 import io.github.maelmbange.thighhigh.playback.PulseSource
 import kotlin.math.abs
@@ -742,23 +741,32 @@ private const val BAR_COUNT = 48
 
 /**
  * One level per bar, 0 to 1, updated every frame from the audio being heard:
- * the music's spectrum, bass on the left and highs on the right (see
- * [Spectrum]), so each bar follows its own frequencies and settles when paused.
+ * each bar follows the loudness of its slice of the current waveform, so the
+ * row ripples with the music, jumps on kicks and settles when paused.
  */
 @Composable
 private fun rememberBarLevels(): androidx.compose.runtime.State<FloatArray> {
     val levels = remember { mutableStateOf(FloatArray(BAR_COUNT)) }
     LaunchedEffect(Unit) {
-        val spectrum = Spectrum(BAR_COUNT)
         val window = FloatArray(2048)
-        val target = FloatArray(BAR_COUNT)
         val smoothed = FloatArray(BAR_COUNT)
         while (true) withFrameNanos {
             val playing = AudioTap.waveform(window)
-            spectrum.levels(window, playing, AudioTap.rate, target)
+            val chunk = window.size / BAR_COUNT
+            var loudest = 0f
+            val rms = FloatArray(BAR_COUNT) { b ->
+                var e = 0f
+                for (j in b * chunk until (b + 1) * chunk) e += window[j] * window[j]
+                sqrt(e / chunk).also { loudest = max(loudest, it) }
+            }
+            // Relative to the loudest slice, so quiet tracks still move; scaled by
+            // the overall level so a quiet passage stays lower than a loud one.
+            val overall = (loudest / 0.3f).coerceIn(0f, 1f)
             for (b in 0 until BAR_COUNT) {
+                val target = if (!playing || loudest == 0f) 0f
+                else (rms[b] / loudest) * (0.35f + 0.65f * overall)
                 // Rise at once, fall back smoothly.
-                smoothed[b] = if (target[b] > smoothed[b]) target[b] else smoothed[b] * 0.86f + target[b] * 0.14f
+                smoothed[b] = if (target > smoothed[b]) target else smoothed[b] * 0.86f + target * 0.14f
             }
             levels.value = smoothed.copyOf()
         }
