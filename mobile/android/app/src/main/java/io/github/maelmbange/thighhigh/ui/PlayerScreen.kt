@@ -7,6 +7,13 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material.icons.filled.Lyrics
 import io.github.maelmbange.thighhigh.LyricsState
+import io.github.maelmbange.thighhigh.cast.CastTrack
+import io.github.maelmbange.thighhigh.lyrics.Lyrics
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.rememberCoroutineScope
@@ -637,7 +644,14 @@ private fun CoverArt(cover: Cover, modifier: Modifier) {
  * dot stays on the center line. Tap or drag anywhere to seek.
  */
 @Composable
-private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: () -> Long, onSeek: (Long) -> Unit) {
+private fun SeekBar(
+    playback: PlaybackState,
+    palette: CoverPalette,
+    positionMs: () -> Long,
+    onSeek: (Long) -> Unit,
+    /** False for a broadcast heard live: the bars dance, the finger moves nothing. */
+    seekable: Boolean = true,
+) {
     var position by remember { mutableLongStateOf(positionMs()) }
     // While the finger is on the bar, show where it is rather than the player.
     var dragFraction by remember { mutableStateOf<Float?>(null) }
@@ -661,7 +675,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
                 .fillMaxWidth()
                 // Taller than the bars at rest, so the ones near the dot can rise.
                 .height(72.dp)
-                .pointerInput(Unit) {
+                .pointerInput(seekable) {
+                    if (!seekable) return@pointerInput
                     detectTapGestures { offset ->
                         if (currentDuration > 0) {
                             val f = (offset.x / size.width).coerceIn(0f, 1f)
@@ -670,7 +685,8 @@ private fun SeekBar(playback: PlaybackState, palette: CoverPalette, positionMs: 
                         }
                     }
                 }
-                .pointerInput(Unit) {
+                .pointerInput(seekable) {
+                    if (!seekable) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { dragFraction = (it.x / size.width).coerceIn(0f, 1f) },
                         onHorizontalDrag = { change, _ ->
@@ -882,10 +898,13 @@ private fun FavoriteButton(favorite: Boolean, color: Color, onToggle: () -> Unit
 }
 
 @Composable
-private fun TrackTitle(track: Track, modifier: Modifier) {
+private fun TrackTitle(track: Track, modifier: Modifier) = TrackTitle(track.title, track.artist, modifier)
+
+@Composable
+private fun TrackTitle(title: String, artist: String?, modifier: Modifier) {
     Column(modifier.fillMaxWidth()) {
         Text(
-            track.title,
+            title,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = TextColors.title,
@@ -893,7 +912,7 @@ private fun TrackTitle(track: Track, modifier: Modifier) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            track.artist ?: stringResource(R.string.unknown_artist),
+            artist ?: stringResource(R.string.unknown_artist),
             style = MaterialTheme.typography.titleMedium,
             color = TextColors.artist,
             maxLines = 1,
@@ -930,5 +949,108 @@ private fun <T> Swap(value: T, instant: Boolean, key: (T) -> Any? = { it }, cont
     Box {
         previous?.let { content(it, Modifier.graphicsLayer { alpha = 1f - progress }) }
         content(current, Modifier.graphicsLayer { alpha = progress })
+    }
+}
+
+/**
+ * A broadcast heard live: the player's screen, cover, lyrics and dancing
+ * bars, without its controls (the broadcaster chooses what plays). Below,
+ * stop listening or pick another device.
+ */
+@Composable
+internal fun LivePlayerScreen(
+    from: String,
+    track: CastTrack?,
+    playing: Boolean,
+    positionMs: () -> Long,
+    onMinimize: () -> Unit,
+    onStop: () -> Unit,
+    onSwitch: () -> Unit,
+    pulseSource: PulseSource = PulseSource.Bass,
+) {
+    val palette = track?.palette ?: CoverPalette.Default
+    val background = MaterialTheme.colorScheme.background
+    var showCover by rememberSaveable { mutableStateOf(true) }
+    val bass = rememberBassLevel(pulseSource)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(lerp(background, palette.primary, 0.35f), background)))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = SCREEN_PADDING),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMinimize) {
+                Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
+            }
+            Text(
+                stringResource(R.string.cast_live_from, from) + if (playing) "" else " · " + stringResource(R.string.cast_paused),
+                Modifier.weight(1f).testTag("castLiveFrom"),
+                color = palette.primary,
+                style = MaterialTheme.typography.labelLarge,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = { showCover = !showCover }, enabled = track != null) {
+                if (showCover) Icon(Icons.Default.Lyrics, stringResource(R.string.show_lyrics))
+                else Icon(Icons.Default.Image, stringResource(R.string.show_cover))
+            }
+        }
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            if (track == null) {
+                Text(stringResource(R.string.cast_waiting), color = TextColors.info)
+            } else {
+                Crossfade(
+                    showCover,
+                    Modifier.graphicsLayer {
+                        val beat = if (showCover) 1f + PULSE_PER_UNIT * COVER_PULSE * bass.at(COVER_DELAY_MS) else 1f
+                        scaleX = beat
+                        scaleY = beat
+                    },
+                    label = "liveVisual",
+                ) { coverShown ->
+                    if (coverShown) {
+                        Swap(track, instant = false, key = { it.title to it.cover }) { t, m ->
+                            CoverArt(Cover(t.cover, t.palette), m.fillMaxWidth().aspectRatio(1f).testTag("cover"))
+                        }
+                    } else {
+                        LyricsView(
+                            LyricsState.Ready(track.lyrics ?: Lyrics.NotFound),
+                            palette,
+                            positionMs,
+                            track.durationMs,
+                            {},
+                            {},
+                            Modifier.fillMaxWidth().aspectRatio(1f),
+                        )
+                    }
+                }
+            }
+        }
+        if (track != null) {
+            Swap(track, instant = false, key = { it.title to it.artist }) { t, m ->
+                TrackTitle(t.title, t.artist.ifEmpty { null }, m)
+            }
+            SeekBar(
+                PlaybackState(isPlaying = playing, durationMs = track.durationMs),
+                palette,
+                positionMs,
+                onSeek = {},
+                seekable = false,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onStop,
+            modifier = Modifier.fillMaxWidth().pulse(bass, 1f),
+            colors = ButtonDefaults.buttonColors(containerColor = palette.tertiary, contentColor = Color.Black),
+        ) {
+            Text(stringResource(R.string.cast_stop_listening))
+        }
+        OutlinedButton(onClick = onSwitch, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            Text(stringResource(R.string.cast_switch_channel), color = TextColors.title)
+        }
     }
 }

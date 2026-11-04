@@ -138,16 +138,37 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     new_string(&mut env, &names)
 }
 
+/// Paired listeners, one per line: id, a tab, then the name.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverForgetListeners<
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverPaired<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+) -> jstring {
+    let lines: Vec<String> = unsafe { server(handle) }
+        .paired()
+        .into_iter()
+        .map(|p| format!("{}\t{}", p.id, p.name.replace(['\t', '\n'], " ")))
+        .collect();
+    new_string(&mut env, &lines.join("\n"))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverForgetPaired<
     'l,
 >(
     mut env: JNIEnv<'l>,
     _class: JClass<'l>,
     handle: jlong,
+    id: JString<'l>,
 ) {
-    if let Err(err) = unsafe { server(handle) }.forget_listeners() {
-        throw(&mut env, err.to_string());
+    let result = string(&mut env, &id).and_then(|id| {
+        unsafe { server(handle) }
+            .forget_paired(&id)
+            .map_err(|e| e.to_string())
+    });
+    if let Err(err) = result {
+        throw(&mut env, err);
     }
 }
 

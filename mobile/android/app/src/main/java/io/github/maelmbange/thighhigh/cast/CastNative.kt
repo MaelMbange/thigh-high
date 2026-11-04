@@ -23,7 +23,9 @@ object CastNative {
     @JvmStatic external fun serverSetOpen(handle: Long, open: Boolean)
     /** Names of the listening devices, one per line. */
     @JvmStatic external fun serverListeners(handle: Long): String
-    @JvmStatic external fun serverForgetListeners(handle: Long)
+    /** Paired listeners, one per line: id, a tab, then the name. */
+    @JvmStatic external fun serverPaired(handle: Long): String
+    @JvmStatic external fun serverForgetPaired(handle: Long, id: String)
     @JvmStatic external fun serverSetTrack(
         handle: Long,
         title: String,

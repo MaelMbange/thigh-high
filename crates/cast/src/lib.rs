@@ -22,7 +22,7 @@ pub mod server;
 pub mod discovery;
 
 pub use client::{Connected, Event, Pending, Session};
-pub use identity::Identity;
+pub use identity::{Identity, Paired};
 pub use server::Server;
 pub use wire::TrackInfo;
 

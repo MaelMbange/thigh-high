@@ -135,6 +135,46 @@ fn code_is_asked_once_then_remembered() {
 }
 
 #[test]
+fn one_paired_listener_is_forgotten() {
+    let dir = temp_dir("forget-one");
+    let server = Server::start(&dir.join("pc"), "PC", false).unwrap();
+    let phone = dir.join("phone");
+    let tablet = dir.join("tablet");
+    for (device, name) in [(&phone, "Phone"), (&tablet, "Tablet")] {
+        let Connected::NeedsCode(pending) = client::connect(device, addr(&server), name).unwrap()
+        else {
+            panic!("no code asked");
+        };
+        drop(pending.pair(&server.code()).unwrap());
+    }
+    let paired = server.paired();
+    assert_eq!(
+        paired.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Phone", "Tablet"]
+    );
+
+    // Forgetting the phone while it listens lets it go.
+    let mut session = ready(client::connect(&phone, addr(&server), "Phone").unwrap());
+    wait_listeners(&server, 1);
+    server.forget_paired(&paired[0].id).unwrap();
+    loop {
+        match session.receive() {
+            Ok(Event::Ended) | Err(_) => break,
+            Ok(_) => continue,
+        }
+    }
+    assert!(matches!(
+        client::connect(&phone, addr(&server), "Phone").unwrap(),
+        Connected::NeedsCode(_)
+    ));
+    drop(ready(
+        client::connect(&tablet, addr(&server), "Tablet").unwrap(),
+    ));
+    assert_eq!(server.paired().len(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wrong_codes_change_the_code() {
     let dir = temp_dir("wrong");
     let server = Server::start(&dir.join("pc"), "PC", false).unwrap();

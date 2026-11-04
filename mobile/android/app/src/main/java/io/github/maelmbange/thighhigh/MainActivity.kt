@@ -72,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -260,15 +261,17 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
-                        IconButton(onClick = { viewModel.castOpen.value = true }) {
-                            // Lit up while broadcasting or listening.
-                            Icon(
-                                Icons.Default.Podcasts,
-                                stringResource(R.string.cast),
-                                tint = if (castUi is io.github.maelmbange.thighhigh.cast.CastUi.Broadcasting ||
-                                    castUi is io.github.maelmbange.thighhigh.cast.CastUi.Listening
-                                ) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Unspecified,
-                            )
+                        // On a tinted disc so it is easy to spot; filled with the
+                        // accent color while broadcasting or listening.
+                        val castActive = castUi is io.github.maelmbange.thighhigh.cast.CastUi.Broadcasting ||
+                            castUi is io.github.maelmbange.thighhigh.cast.CastUi.Listening
+                        androidx.compose.material3.FilledTonalIconButton(
+                            onClick = { viewModel.castOpen.value = true },
+                            colors = if (castActive) androidx.compose.material3.IconButtonDefaults.filledIconButtonColors()
+                                else androidx.compose.material3.IconButtonDefaults.filledTonalIconButtonColors(),
+                            modifier = Modifier.testTag("castButton"),
+                        ) {
+                            Icon(Icons.Default.Podcasts, stringResource(R.string.cast))
                         }
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Default.Settings, stringResource(R.string.settings))
@@ -566,11 +569,18 @@ class MainActivity : ComponentActivity() {
         }
 
         // The broadcast screen slides over everything, the player included.
-        CastOverlay(viewModel, castOpen, castUi, castNotice, hasTrack = current != null)
+        CastOverlay(viewModel, castOpen, castUi, castNotice, hasTrack = current != null, pulseSource = pulseSource)
     }
 
     @Composable
-    private fun CastOverlay(viewModel: LibraryViewModel, open: Boolean, ui: io.github.maelmbange.thighhigh.cast.CastUi, notice: io.github.maelmbange.thighhigh.cast.CastNotice?, hasTrack: Boolean) {
+    private fun CastOverlay(
+        viewModel: LibraryViewModel,
+        open: Boolean,
+        ui: io.github.maelmbange.thighhigh.cast.CastUi,
+        notice: io.github.maelmbange.thighhigh.cast.CastNotice?,
+        hasTrack: Boolean,
+        pulseSource: io.github.maelmbange.thighhigh.playback.PulseSource,
+    ) {
         val cast = viewModel.cast
         AnimatedVisibility(
             visible = open,
@@ -596,13 +606,15 @@ class MainActivity : ComponentActivity() {
                 onCancelBroadcast = cast::cancelBroadcast,
                 onListen = { cast.clearNotice(); cast.startBrowsing() },
                 onSetOpen = cast::setOpen,
-                onForget = cast::forgetListeners,
+                onForgetPaired = cast::forgetPaired,
                 onStopBroadcast = cast::stopBroadcast,
                 onConnect = { cast.clearNotice(); cast.connect(it) },
                 onSubmitCode = { cast.clearNotice(); cast.submitCode(it) },
                 onCancel = cast::cancelConnecting,
                 onStopListening = cast::stopListening,
+                onSwitchChannel = { cast.clearNotice(); cast.switchChannel() },
                 onBack = cast::stopBrowsing,
+                pulseSource = pulseSource,
             )
         }
     }

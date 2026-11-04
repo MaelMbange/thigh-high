@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
-use crate::identity::{Identity, TrustedListeners};
+use crate::identity::{Identity, Paired, TrustedListeners, paired_id};
 use crate::pairing;
 use crate::wire::{self, Message, PROTOCOL, Reject, TrackInfo};
 
@@ -38,6 +38,8 @@ type Frame = Arc<Vec<u8>>;
 struct Listener {
     id: u64,
     name: String,
+    /// Its entry among the paired listeners, if it entered the code once.
+    paired: Option<String>,
     queue: SyncSender<Frame>,
     dropped: u32,
 }
@@ -128,6 +130,19 @@ impl Server {
     /// Lets every listener that ever paired type the code again.
     pub fn forget_listeners(&self) -> io::Result<()> {
         TrustedListeners::new(&self.shared.dir).forget_all()
+    }
+
+    /// Listeners that entered the code once and may come back without it.
+    pub fn paired(&self) -> Vec<Paired> {
+        TrustedListeners::new(&self.shared.dir).list()
+    }
+
+    /// Forgets one paired listener and lets it go if it is listening now.
+    pub fn forget_paired(&self, id: &str) -> io::Result<()> {
+        TrustedListeners::new(&self.shared.dir).forget(id)?;
+        let mut listeners = self.shared.listeners.lock().unwrap();
+        listeners.retain(|l| l.paired.as_deref() != Some(id));
+        Ok(())
     }
 
     /// Names of the devices listening now.
@@ -294,12 +309,14 @@ fn serve(shared: &Shared, stream: TcpStream) -> io::Result<()> {
 
     let trusted_store = TrustedListeners::new(&shared.dir);
     let trusted = token.is_some_and(|t| trusted_store.is_trusted(&t));
+    let mut paired = token.filter(|_| trusted).map(|t| paired_id(&t));
     let mut new_token = None;
     if !trusted && !shared.open.load(Ordering::Relaxed) {
         match pair(shared, &mut tls)? {
             true => {
                 let token = pairing::random::<32>();
                 trusted_store.add(&token, &name)?;
+                paired = Some(paired_id(&token));
                 new_token = Some(token);
             }
             false => return Ok(()),
@@ -324,6 +341,7 @@ fn serve(shared: &Shared, stream: TcpStream) -> io::Result<()> {
     shared.listeners.lock().unwrap().push(Listener {
         id,
         name,
+        paired,
         queue,
         dropped: 0,
     });

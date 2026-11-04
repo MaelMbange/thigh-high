@@ -142,9 +142,45 @@ impl TrustedListeners {
         self.0.write(&entries)
     }
 
+    /// Paired listeners, oldest first.
+    pub fn list(&self) -> Vec<Paired> {
+        self.0
+            .read()
+            .into_iter()
+            .map(|(hash, _, name)| Paired {
+                id: hex(&hash),
+                name,
+            })
+            .collect()
+    }
+
+    /// Makes one listener type the code again. `id` is from [Self::list].
+    pub fn forget(&self, id: &str) -> io::Result<()> {
+        let entries: Vec<_> = self
+            .0
+            .read()
+            .into_iter()
+            .filter(|(hash, _, _)| hex(hash) != id)
+            .collect();
+        self.0.write(&entries)
+    }
+
     pub fn forget_all(&self) -> io::Result<()> {
         self.0.write(&[])
     }
+}
+
+/// A listener that entered the code once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Paired {
+    /// Hash of its token: names the entry, lets no one in.
+    pub id: String,
+    pub name: String,
+}
+
+/// The id [TrustedListeners::list] gives the listener holding `token`.
+pub fn paired_id(token: &[u8; 32]) -> String {
+    hex(&fingerprint(token))
 }
 
 /// Listener side: broadcasters paired with, and the token each one gave.
@@ -217,6 +253,19 @@ mod tests {
         listeners.add(&[1; 32], "Pixel\nevil").unwrap();
         assert!(listeners.is_trusted(&[1; 32]));
         assert!(!listeners.is_trusted(&[2; 32]));
+        listeners.add(&[2; 32], "B").unwrap();
+        let list = listeners.list();
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            list[1],
+            Paired {
+                id: paired_id(&[2; 32]),
+                name: "B".into()
+            }
+        );
+        listeners.forget(&paired_id(&[1; 32])).unwrap();
+        assert!(!listeners.is_trusted(&[1; 32]));
+        assert!(listeners.is_trusted(&[2; 32]));
 
         let known = KnownBroadcasters::new(&dir);
         known.remember(&[9; 32], &[3; 32], "PC").unwrap();

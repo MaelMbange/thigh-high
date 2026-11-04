@@ -6,6 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -15,6 +18,7 @@ import io.github.maelmbange.thighhigh.cast.CastNotice
 import io.github.maelmbange.thighhigh.cast.CastTrack
 import io.github.maelmbange.thighhigh.cast.CastUi
 import io.github.maelmbange.thighhigh.cast.Found
+import io.github.maelmbange.thighhigh.cast.PairedDevice
 import io.github.maelmbange.thighhigh.cast.toText
 import io.github.maelmbange.thighhigh.lyrics.LyricLine
 import io.github.maelmbange.thighhigh.lyrics.Lyrics
@@ -48,12 +52,13 @@ class CastScreenTest {
                 onCancelBroadcast = { calls += "cancelBroadcast" },
                 onListen = { calls += "listen" },
                 onSetOpen = { calls += "open:$it" },
-                onForget = { calls += "forget" },
+                onForgetPaired = { calls += "forget:$it" },
                 onStopBroadcast = { calls += "stop" },
                 onConnect = { calls += "connect:${it.name}" },
                 onSubmitCode = { calls += "code:$it" },
                 onCancel = { calls += "cancel" },
                 onStopListening = { calls += "unlisten" },
+                onSwitchChannel = { calls += "switch" },
                 onBack = { calls += "back" },
             )
         }
@@ -99,6 +104,18 @@ class CastScreenTest {
     }
 
     @Test
+    fun pairedDevicesAreForgottenOneByOne() {
+        ui = CastUi.Broadcasting(
+            "Pixel", open = false, code = "123456", listeners = listOf("Wetwork"), visible = true,
+            paired = listOf(PairedDevice("aa", "Wetwork"), PairedDevice("bb", "Tablette")),
+        )
+        show()
+        rule.onAllNodesWithTag("castPaired").assertCountEquals(2)
+        rule.onNodeWithContentDescription("Oublier Tablette").performClick()
+        assertEquals(listOf("forget:bb"), calls)
+    }
+
+    @Test
     fun devicesAreListedAndJoined() {
         ui = CastUi.Browsing(listOf(Found("PC", "PC", "192.168.1.2", 4000, "abc", open = true, compatible = true)))
         show()
@@ -129,9 +146,15 @@ class CastScreenTest {
         show()
         rule.onNodeWithText("En direct de PC").assertExists()
         rule.onNodeWithText("Titre").assertExists()
+        rule.onNodeWithTag("cover").assertExists()
+        // No player controls: the broadcaster chooses what plays.
+        rule.onNodeWithContentDescription("Pause").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Afficher les paroles").performClick()
+        rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText("première ligne").assertExists()
+        rule.onNodeWithText("Changer de canal").performClick()
         rule.onNodeWithText("Arrêter l'écoute").performClick()
-        assertEquals(listOf("unlisten"), calls)
+        assertEquals(listOf("switch", "unlisten"), calls)
     }
 
     @Test

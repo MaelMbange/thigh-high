@@ -57,6 +57,9 @@ data class CastTrack(
     val lyrics: Lyrics?,
 )
 
+/** A listener that entered the code once and comes back without it. */
+data class PairedDevice(val id: String, val name: String)
+
 /** Something to tell the user once, as a short message. */
 enum class CastNotice { WrongCode, CodeChanged, Full, OtherVersion, Unreachable, Ended, Lost, CantStart }
 
@@ -69,6 +72,7 @@ sealed interface CastUi {
         val open: Boolean,
         val code: String,
         val listeners: List<String>,
+        val paired: List<PairedDevice> = emptyList(),
         /** False when the network announcement failed (nobody can find it). */
         val visible: Boolean,
     ) : CastUi
@@ -179,6 +183,7 @@ class CastController(
                         if (ui is CastUi.Broadcasting && server != 0L) ui.copy(
                             code = CastNative.serverCode(server),
                             listeners = CastNative.serverListeners(server).lines().filter { it.isNotEmpty() },
+                            paired = paired(server),
                         ) else ui
                     }
                     delay(250)
@@ -221,8 +226,17 @@ class CastController(
         announce(handle, open)
     }
 
-    fun forgetListeners() {
-        server.takeIf { it != 0L }?.let { runCatching { CastNative.serverForgetListeners(it) } }
+    private fun paired(handle: Long): List<PairedDevice> =
+        CastNative.serverPaired(handle).lines().mapNotNull { line ->
+            val id = line.substringBefore('\t', "")
+            if (id.isEmpty()) null else PairedDevice(id, line.substringAfter('\t'))
+        }
+
+    /** That device must type the code again; it is let go if it listens now. */
+    fun forgetPaired(id: String) {
+        val handle = server.takeIf { it != 0L } ?: return
+        runCatching { CastNative.serverForgetPaired(handle, id) }
+        _ui.update { if (it is CastUi.Broadcasting) it.copy(paired = paired(handle)) else it }
     }
 
     fun stopBroadcast() {
@@ -456,6 +470,7 @@ class CastController(
         onListenStart()
         val name = CastNative.clientName(handle)
         _ui.value = CastUi.Listening(name, track = null, playing = true)
+        AudioTap.setLive(true, lagMs = BUFFER_MS + 40)
         Thread({ receive(handle, name) }, "cast-listen").start()
     }
 
@@ -479,6 +494,8 @@ class CastController(
                         val track = output ?: continue
                         val start = framesWritten
                         track.write(samples, 0, n, AudioTrack.WRITE_BLOCKING)
+                        // The player's animations follow what is heard here.
+                        AudioTap.pushLive(samples, n, rate)
                         framesWritten += n / 2
                         lastChunkStart = start
                         lastPosMs = CastNative.clientPosMs(handle)
@@ -513,6 +530,8 @@ class CastController(
             }
             output = null
             outputRate = 0
+            // Unless another broadcast is already being heard.
+            if (session == 0L || session == handle) AudioTap.setLive(false)
             CastNative.clientFree(handle)
             scope.launch {
                 if (session == handle) {
@@ -570,6 +589,12 @@ class CastController(
         CastNative.clientClose(handle)
         session = 0L
         if (_ui.value is CastUi.Listening) _ui.value = CastUi.Idle
+    }
+
+    /** Leaves this broadcast and shows the devices again, to pick another one. */
+    fun switchChannel() {
+        stopListening()
+        startBrowsing()
     }
 
     val isListening: Boolean get() = session != 0L
