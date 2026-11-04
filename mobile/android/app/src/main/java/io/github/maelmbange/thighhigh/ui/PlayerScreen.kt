@@ -14,6 +14,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.rememberCoroutineScope
@@ -963,7 +964,6 @@ internal fun LivePlayerScreen(
     track: CastTrack?,
     playing: Boolean,
     positionMs: () -> Long,
-    onMinimize: () -> Unit,
     onStop: () -> Unit,
     onSwitch: () -> Unit,
     pulseSource: PulseSource = PulseSource.Bass,
@@ -980,10 +980,11 @@ internal fun LivePlayerScreen(
             .navigationBarsPadding()
             .padding(horizontal = SCREEN_PADDING),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onMinimize) {
-                Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.minimize), Modifier.size(32.dp))
-            }
+        // No way back from here but the two buttons below: the screen stays
+        // until the listening stops or another device is picked.
+        BackHandler {}
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.width(48.dp))
             Text(
                 stringResource(R.string.cast_live_from, from) + if (playing) "" else " · " + stringResource(R.string.cast_paused),
                 Modifier.weight(1f).testTag("castLiveFrom"),

@@ -132,7 +132,9 @@ class CastScreenTest {
         ui = CastUi.Browsing(listOf(Found("PC", "PC", "192.168.1.2", 4000, "abc", open = true, compatible = true)))
         show()
         rule.onNodeWithText("PC").performClick()
-        assertEquals(listOf("connect:PC"), calls)
+        // The back arrow does what "Annuler" does: back to the two buttons.
+        rule.onNodeWithContentDescription("Retour").performClick()
+        assertEquals(listOf("connect:PC", "back"), calls)
     }
 
     @Test
@@ -161,6 +163,9 @@ class CastScreenTest {
         rule.onNodeWithTag("cover").assertExists()
         // No player controls: the broadcaster chooses what plays.
         rule.onNodeWithContentDescription("Pause").assertDoesNotExist()
+        // Nor any way back: only stopping or changing channel leaves.
+        rule.onNodeWithContentDescription("Réduire").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Retour").assertDoesNotExist()
         rule.onNodeWithContentDescription("Afficher les paroles").performClick()
         rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText("première ligne").assertExists()

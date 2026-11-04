@@ -108,7 +108,7 @@ fun CastScreen(
     // Listening takes the whole screen: the player's, without its controls.
     if (ui is CastUi.Listening) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Listening(ui, heardMs, onClose, onStopListening, onSwitchChannel, pulseSource)
+            Listening(ui, heardMs, onStopListening, onSwitchChannel, pulseSource)
         }
         return
     }
@@ -117,7 +117,14 @@ fun CastScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.cast), color = TextColors.title) },
                 navigationIcon = {
-                    IconButton(onClick = if (ui is CastUi.ReadyToBroadcast) onCancelBroadcast else onClose) {
+                    // Within a step, back does what its "Annuler" does.
+                    IconButton(
+                        onClick = when (ui) {
+                            is CastUi.ReadyToBroadcast -> onCancelBroadcast
+                            is CastUi.Browsing -> onBack
+                            else -> onClose
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
                     }
                 },
@@ -455,7 +462,6 @@ private fun AskCode(ui: CastUi.AskingCode, onSubmit: (String) -> Unit, onCancel:
 private fun Listening(
     ui: CastUi.Listening,
     heardMs: () -> Long,
-    onMinimize: () -> Unit,
     onStop: () -> Unit,
     onSwitch: () -> Unit,
     pulseSource: PulseSource,
@@ -471,7 +477,6 @@ private fun Listening(
         track = ui.track,
         playing = ui.playing,
         positionMs = heardMs,
-        onMinimize = onMinimize,
         onStop = onStop,
         onSwitch = onSwitch,
         pulseSource = pulseSource,

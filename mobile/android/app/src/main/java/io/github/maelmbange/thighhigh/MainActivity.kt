@@ -595,7 +595,13 @@ class MainActivity : ComponentActivity() {
                 cast.cancelBroadcast()
             }
             BackHandler {
-                if (ui is io.github.maelmbange.thighhigh.cast.CastUi.ReadyToBroadcast) cast.cancelBroadcast() else close()
+                when (ui) {
+                    is io.github.maelmbange.thighhigh.cast.CastUi.ReadyToBroadcast -> cast.cancelBroadcast()
+                    is io.github.maelmbange.thighhigh.cast.CastUi.Browsing -> cast.stopBrowsing()
+                    // Only "Arrêter l'écoute" or "Changer de canal" leave it.
+                    is io.github.maelmbange.thighhigh.cast.CastUi.Listening -> Unit
+                    else -> close()
+                }
             }
             CastScreen(
                 ui = ui,
