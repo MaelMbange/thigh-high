@@ -1,6 +1,7 @@
 package io.github.maelmbange.thighhigh.lyrics
 
 import org.json.JSONArray
+import java.text.Normalizer
 import org.json.JSONObject
 import kotlin.math.abs
 
@@ -95,14 +96,55 @@ fun lyricsOf(record: JSONObject): Lyrics {
     return plain?.let { Lyrics.Plain(it.trim()) } ?: Lyrics.NotFound
 }
 
+/** A name reduced to its words: no accents, case, punctuation or "(Official Video)". */
+private fun words(s: String): String =
+    Normalizer.normalize(NOISE.replace(s, ""), Normalizer.Form.NFD)
+        .replace(Regex("""\p{M}+"""), "")
+        .lowercase()
+        .replace("&", " and ")
+        .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+        .trim()
+
+/** Whether one name holds the other as whole words ("one more time" in "one more time radio edit"). */
+private fun holds(a: String, b: String): Boolean {
+    if (a.isEmpty() || b.isEmpty()) return false
+    return " $a ".contains(" $b ") || " $b ".contains(" $a ")
+}
+
 /**
- * The best of LRCLIB's search results for a track of [durationSec]: within
- * a few seconds of it (another length is another version), synced first.
+ * Whether an LRCLIB [record] is the song looked for: its title must be the
+ * [title], and its artist the [artist] when one is known (or named in the
+ * file's [rawTitle], for videos uploaded by a label). Without this, any song
+ * of about the same length could pass, and its lyrics would be kept.
  */
-fun bestMatch(results: JSONArray, durationSec: Long?): JSONObject? {
+fun isSameSong(record: JSONObject, title: String, artist: String?, rawTitle: String = title): Boolean {
+    val recordTitle = words(record.optString("trackName").takeUnless { record.isNull("trackName") } ?: "")
+    if (!holds(recordTitle, words(title))) return false
+    if (artist == null) return true
+    val recordArtist = words(record.optString("artistName").takeUnless { record.isNull("artistName") } ?: "")
+    if (recordArtist.isEmpty()) return false
+    if (holds(recordArtist, words(artist)) || " ${words(rawTitle)} ".contains(" $recordArtist ")) return true
+    // "Daft Punk feat. Pharrell" against "Daft Punk, Pharrell": a shared name is enough.
+    val names = { a: String -> a.split(Regex(""" (?:and|feat|ft|x|with) |,""")).map { it.trim() }.filter { it.length >= 2 }.toSet() }
+    return names(recordArtist).any { n -> names(words(artist)).any { holds(it, n) } }
+}
+
+/**
+ * The best of LRCLIB's search results for [title] by [artist], [durationSec]
+ * long: the same song (see [isSameSong]), within a few seconds of it (another
+ * length is another version), synced first.
+ */
+fun bestMatch(
+    results: JSONArray,
+    durationSec: Long?,
+    title: String,
+    artist: String?,
+    rawTitle: String = title,
+): JSONObject? {
     val records = (0 until results.length()).map { results.getJSONObject(it) }
     return records
         .filter { durationSec == null || abs(it.optDouble("duration", 0.0) - durationSec) <= 5 }
+        .filter { isSameSong(it, title, artist, rawTitle) }
         .filter { lyricsOf(it) != Lyrics.NotFound }
         .minWithOrNull(
             compareBy<JSONObject> { if (lyricsOf(it) is Lyrics.Synced) 0 else 1 }

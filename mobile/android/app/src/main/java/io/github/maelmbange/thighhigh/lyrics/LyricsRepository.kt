@@ -22,6 +22,12 @@ private const val API = "https://lrclib.net/api"
 private const val RETRY_NOT_FOUND_MS = 7L * 24 * 60 * 60 * 1000
 
 /**
+ * The way lyrics are matched. Lyrics kept by an older way (before 2, any song
+ * of the same length could be taken) are looked up again.
+ */
+private const val MATCHING = 2
+
+/**
  * Finds lyrics on LRCLIB and keeps them in the app's files, one per track,
  * so each track is looked up once and its lyrics then show offline.
  */
@@ -35,17 +41,33 @@ class LyricsRepository(context: Context) {
     /** The lyrics of [track]; throws [IOException] when offline and none were kept. */
     suspend fun load(track: Track): Lyrics = withContext(Dispatchers.IO) {
         val file = File(dir, "${track.id}.json")
-        cached(file)?.let { return@withContext it }
-        val found = lookUp(track)
-        runCatching { file.writeText(found.toJson().toString()) }
+        val kept = kept(file)
+        if (kept != null && kept.fresh(track)) return@withContext kept.lyrics
+        val found = try {
+            lookUp(track)
+        } catch (e: IOException) {
+            // Offline: the older lyrics until the next try, kept as they were.
+            return@withContext kept?.lyrics?.takeIf { it != Lyrics.NotFound } ?: throw e
+        }
+        runCatching {
+            file.writeText(found.toJson().put("matching", MATCHING).put("title", track.title).put("artist", track.artist ?: "").toString())
+        }
         found
     }
 
-    private fun cached(file: File): Lyrics? {
+    private class Kept(val lyrics: Lyrics, val json: JSONObject, val modified: Long) {
+        /** Whether these lyrics were found for this very track, the way they are matched now. */
+        fun fresh(track: Track): Boolean =
+            json.optInt("matching") >= MATCHING &&
+                json.optString("title") == track.title &&
+                json.optString("artist") == (track.artist ?: "") &&
+                !(lyrics == Lyrics.NotFound && System.currentTimeMillis() - modified > RETRY_NOT_FOUND_MS)
+    }
+
+    private fun kept(file: File): Kept? {
         if (!file.exists()) return null
-        val lyrics = runCatching { lyricsFromJson(JSONObject(file.readText())) }.getOrNull() ?: return null
-        val stale = lyrics == Lyrics.NotFound && System.currentTimeMillis() - file.lastModified() > RETRY_NOT_FOUND_MS
-        return lyrics.takeUnless { stale }
+        val json = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return null
+        return Kept(lyricsFromJson(json), json, file.lastModified())
     }
 
     private fun lookUp(track: Track): Lyrics {
@@ -55,9 +77,12 @@ class LyricsRepository(context: Context) {
         if (artist != null && seconds != null) {
             val params = mutableListOf("track_name" to title, "artist_name" to artist, "duration" to seconds.toString())
             track.album?.let { params += "album_name" to it }
-            get("/get", params)?.let { lyricsOf(JSONObject(it)) }?.takeIf { it != Lyrics.NotFound }?.let { return it }
+            get("/get", params)?.let { JSONObject(it) }
+                ?.takeIf { isSameSong(it, title, artist, track.title) }
+                ?.let { lyricsOf(it) }?.takeIf { it != Lyrics.NotFound }?.let { return it }
         }
-        // Then a search, the title with the artist, then everything as free text.
+        // Then a search, the title with the artist, then everything as free
+        // text. Every result must still be this song by this artist.
         val searches = listOfNotNull(
             artist?.let { listOf("track_name" to title, "artist_name" to it) },
             listOf("q" to listOfNotNull(artist, title).joinToString(" ")),
@@ -65,7 +90,7 @@ class LyricsRepository(context: Context) {
         ).distinct()
         for (params in searches) {
             val body = get("/search", params) ?: continue
-            bestMatch(JSONArray(body), seconds)?.let { return lyricsOf(it) }
+            bestMatch(JSONArray(body), seconds, title, artist, track.title)?.let { return lyricsOf(it) }
         }
         return Lyrics.NotFound
     }

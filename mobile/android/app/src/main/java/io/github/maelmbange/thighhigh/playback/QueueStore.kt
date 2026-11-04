@@ -11,6 +11,8 @@ data class SavedQueue(
     val positionMs: Long,
     val repeatMode: Int,
     val shuffle: Boolean,
+    /** The list the queue was built from ("playlist:…", "library"…), or null for a mixed queue. */
+    val source: String? = null,
 )
 
 /**
@@ -41,8 +43,12 @@ class QueueStore(context: Context) {
             positionMs = prefs.getLong(POSITION, 0L),
             repeatMode = prefs.getInt(REPEAT, Player.REPEAT_MODE_OFF),
             shuffle = prefs.getBoolean(SHUFFLE, false),
+            source = prefs.getString(SOURCE, null),
         )
     }
+
+    /** Which list the queue comes from: kept apart, as only the app knows it. */
+    fun saveSource(source: String?) = prefs.edit { putString(SOURCE, source) }
 
     private companion object {
         const val IDS = "ids"
@@ -50,5 +56,6 @@ class QueueStore(context: Context) {
         const val POSITION = "position"
         const val REPEAT = "repeat"
         const val SHUFFLE = "shuffle"
+        const val SOURCE = "source"
     }
 }

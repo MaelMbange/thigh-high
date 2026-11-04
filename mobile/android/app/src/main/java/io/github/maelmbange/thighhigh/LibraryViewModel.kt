@@ -56,6 +56,9 @@ enum class HomeView { Home, All, Favorites }
 /** How many recently played tracks the home screen lists. */
 const val RECENT_SHOWN = 5
 
+/** The source of a track played from the recently played on the home screen. */
+const val RECENT = "recent"
+
 /** Off → whole list → current track, like the terminal app's loop key. */
 enum class Repeat(val mode: Int) {
     Off(Player.REPEAT_MODE_OFF),
@@ -188,6 +191,9 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** The playlist opened in the Playlists tab, or null for the list of playlists. */
     val openPlaylistId = MutableStateFlow<String?>(null)
 
+    /** Whether the open playlist was opened from the home screen: back then returns there. */
+    val playlistFromHome = MutableStateFlow(false)
+
     private val _history = MutableStateFlow<List<QueueEntry>>(emptyList())
     /** What already played from the queue, oldest first, in the order it played. */
     val history: StateFlow<List<QueueEntry>> = _history.asStateFlow()
@@ -208,6 +214,15 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Which list the queue was built from, so a track tapped in another list starts that list. */
     private var queueSource: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            // Kept, so after a restart the same list carries on (and tapping
+            // its track again only resumes it).
+            queueStore.saveSource(value)
+        }
+
+    private val queueStore = QueueStore(app)
 
     private var controller: MediaController? = null
     private val controllerFuture: ListenableFuture<MediaController> =
@@ -287,7 +302,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private fun restoreQueue(c: MediaController) {
         viewModelScope.launch {
             val restored = withContext(Dispatchers.IO) {
-                val saved = QueueStore(getApplication()).load() ?: return@withContext null
+                val saved = queueStore.load() ?: return@withContext null
                 val byId = scanLibrary(getApplication()).associateBy { it.id }
                 val kept = saved.ids.mapNotNull(byId::get)
                 val index = kept.indexOfFirst { it.id == saved.ids[saved.index] }
@@ -297,6 +312,7 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             if (c.mediaItemCount != 0) return@launch // something started meanwhile
             c.repeatMode = saved.repeatMode
             c.shuffleModeEnabled = saved.shuffle
+            queueSource = saved.source
             c.setMediaItems(kept.map { it.toMediaItem() }, index.coerceAtLeast(0), if (index >= 0) saved.positionMs else 0L)
         }
     }
@@ -336,17 +352,20 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Plays [track], queueing [list] so next/previous follow it, and opens the
-     * player. Tapping the track already playing from the same list only resumes it.
+     * player, in order: a random order stays for the "Mélanger" buttons. Tapping
+     * the track already playing from the same list only resumes it, and so does
+     * tapping it among the recently played (the playlist it came from goes on).
      */
     fun playList(list: List<Track>, track: Track, source: String) {
         playerOpen.value = true
         val c = controller ?: return
-        if (_playback.value.currentId == track.id && queueSource == source) {
+        if (_playback.value.currentId == track.id && (queueSource == source || source == RECENT)) {
             if (!c.isPlaying) resume(c)
             return
         }
         queueSource = source
         markPlaylistPlayed(source)
+        c.shuffleModeEnabled = false
         c.setMediaItems(list.map { it.toMediaItem() }, list.indexOf(track).coerceAtLeast(0), 0L)
         c.prepare()
         c.play()

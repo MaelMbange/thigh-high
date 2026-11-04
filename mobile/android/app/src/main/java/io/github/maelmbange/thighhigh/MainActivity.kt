@@ -188,7 +188,15 @@ class MainActivity : ComponentActivity() {
             if (pagerState.targetPage != tab.ordinal) pagerState.animateScrollToPage(tab.ordinal)
         }
         LaunchedEffect(pagerState) {
-            snapshotFlow { pagerState.settledPage }.collect { viewModel.tab.value = Tab.entries[it] }
+            snapshotFlow { pagerState.settledPage }.collect {
+                viewModel.tab.value = Tab.entries[it]
+                // Back on the home screen: a playlist opened from it closes
+                // behind, so the Playlists tab shows its grid next time.
+                if (Tab.entries[it] == Tab.Library && viewModel.playlistFromHome.value) {
+                    viewModel.playlistFromHome.value = false
+                    viewModel.openPlaylistId.value = null
+                }
+            }
         }
         val tracks by viewModel.tracks.collectAsStateWithLifecycle()
         val visibleTracks by viewModel.visibleTracks.collectAsStateWithLifecycle()
@@ -305,7 +313,10 @@ class MainActivity : ComponentActivity() {
                             // the home panel, or the list of playlists.
                             if (picked == tab) when (picked) {
                                 Tab.Library -> viewModel.homeView.value = HomeView.Home
-                                Tab.Playlists -> viewModel.openPlaylistId.value = null
+                                Tab.Playlists -> {
+                                    viewModel.openPlaylistId.value = null
+                                    viewModel.playlistFromHome.value = false
+                                }
                                 Tab.Download -> Unit
                             }
                             viewModel.tab.value = picked
@@ -354,10 +365,11 @@ class MainActivity : ComponentActivity() {
                           isPlaying = playback.isPlaying,
                           onOpenFavorites = { viewModel.homeView.value = HomeView.Favorites },
                           onOpenAll = { viewModel.homeView.value = HomeView.All },
-                          onPlayRecent = { viewModel.playList(recent, it, "recent") },
+                          onPlayRecent = { viewModel.playList(recent, it, RECENT) },
                           onTrackLongClick = { actionTrack = it to null },
                           onOpenPlaylist = {
                               viewModel.openPlaylistId.value = it.id
+                              viewModel.playlistFromHome.value = true
                               viewModel.tab.value = Tab.Playlists
                           },
                           onCreatePlaylist = { viewModel.createPlaylist(it) },
@@ -410,7 +422,9 @@ class MainActivity : ComponentActivity() {
                     }
                     Tab.Playlists -> {
                         BackHandler(enabled = openPlaylistId != null && pagerState.currentPage == Tab.Playlists.ordinal) {
-                            viewModel.openPlaylistId.value = null
+                            // Opened from the home screen: back goes back there, not to the grid.
+                            if (viewModel.playlistFromHome.value) viewModel.tab.value = Tab.Library
+                            else viewModel.openPlaylistId.value = null
                         }
                         PlaylistsScreen(
                             playlists = playlists,
@@ -418,7 +432,15 @@ class MainActivity : ComponentActivity() {
                             openId = openPlaylistId,
                             currentId = playback.currentId,
                             isPlaying = playback.isPlaying,
-                            onOpen = { viewModel.openPlaylistId.value = it },
+                            onOpen = {
+                                // The back arrow of a playlist opened from the home screen goes back there too.
+                                if (it == null && viewModel.playlistFromHome.value) {
+                                    viewModel.tab.value = Tab.Library
+                                } else {
+                                    viewModel.openPlaylistId.value = it
+                                    viewModel.playlistFromHome.value = false
+                                }
+                            },
                             onCreate = { viewModel.createPlaylist(it) },
                             onPlay = { p, list, track -> viewModel.playList(list, track, "playlist:${p.id}") },
                             onShuffle = { p, list -> viewModel.shufflePlay(list, "playlist:${p.id}") },

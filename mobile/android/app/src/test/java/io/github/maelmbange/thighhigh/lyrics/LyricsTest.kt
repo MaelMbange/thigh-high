@@ -3,6 +3,8 @@ package io.github.maelmbange.thighhigh.lyrics
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,14 +43,37 @@ class LyricsTest {
         assertEquals("Song" to null, searchTerms("Song (Lyrics)", null))
     }
 
+    private fun record(title: String, artist: String, duration: Double, synced: String? = null, plain: String? = null) =
+        JSONObject().put("trackName", title).put("artistName", artist).put("duration", duration).apply {
+            synced?.let { put("syncedLyrics", it) }
+            plain?.let { put("plainLyrics", it) }
+        }
+
     @Test fun picksASyncedResultOfTheSameLength() {
         val results = JSONArray()
-            .put(JSONObject().put("duration", 200.0).put("syncedLyrics", "[00:01.00] wrong length"))
-            .put(JSONObject().put("duration", 321.0).put("plainLyrics", "plain only"))
-            .put(JSONObject().put("duration", 318.0).put("syncedLyrics", "[00:01.00] right"))
-        val best = bestMatch(results, 320)!!
+            .put(record("Odessa", "Caribou", 200.0, synced = "[00:01.00] wrong length"))
+            .put(record("Odessa", "Caribou", 321.0, plain = "plain only"))
+            .put(record("Odessa", "Caribou", 318.0, synced = "[00:01.00] right"))
+        val best = bestMatch(results, 320, "Odessa", "Caribou")!!
         assertEquals(Lyrics.Synced(listOf(LyricLine(1_000, "right"))), lyricsOf(best))
-        assertNull(bestMatch(JSONArray().put(JSONObject().put("duration", 100.0).put("plainLyrics", "x")), 320))
+        assertNull(bestMatch(JSONArray().put(record("Odessa", "Caribou", 100.0, plain = "x")), 320, "Odessa", "Caribou"))
+    }
+
+    @Test fun neverTakesAnotherSongOfTheSameLength() {
+        // Free-text searches bring back other songs: same length is not enough.
+        val results = JSONArray()
+            .put(record("Nightcall", "Kavinsky", 258.0, synced = "[00:01.00] wrong song"))
+            .put(record("Odessa", "Someone Else", 258.0, synced = "[00:01.00] cover by another artist"))
+        assertNull(bestMatch(results, 258, "Odessa", "Caribou"))
+        assertNull(bestMatch(results, 258, "Midnight City", null))
+    }
+
+    @Test fun recognisesTheSameSongWrittenDifferently() {
+        assertTrue(isSameSong(record("Alors On Danse (Radio Edit)", "Stromae", 0.0), "Alors on danse", "Stromae"))
+        assertTrue(isSameSong(record("Déjà vu", "Beyoncé feat. Jay-Z", 0.0), "Deja Vu", "Beyonce"))
+        assertTrue(isSameSong(record("Get Lucky", "Daft Punk", 0.0), "Get Lucky", "Parlophone", "Daft Punk - Get Lucky (Official Audio)"))
+        assertFalse(isSameSong(record("Lucky", "Daft Punk", 0.0).put("trackName", "Lucky Star"), "Get Lucky", "Daft Punk"))
+        assertFalse(isSameSong(record("Get Lucky", "Someone", 0.0), "Get Lucky", "Daft Punk"))
     }
 
     @Test fun nullFieldsAreMissingNotText() {
