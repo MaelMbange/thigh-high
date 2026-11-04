@@ -123,13 +123,32 @@ impl Server {
         self.shared.open.load(Ordering::Relaxed)
     }
 
+    /// Closing (open to code) lets go of the listeners that never typed
+    /// the code; opening changes nothing for those already in.
     pub fn set_open(&self, open: bool) {
         self.shared.open.store(open, Ordering::Relaxed);
+        if !open {
+            let mut listeners = self.shared.listeners.lock().unwrap();
+            listeners.retain(|l| l.paired.is_some());
+        }
     }
 
-    /// Lets every listener that ever paired type the code again.
+    /// Lets every listener that ever paired type the code again; those
+    /// listening now are let go, unless the broadcast is open.
     pub fn forget_listeners(&self) -> io::Result<()> {
-        TrustedListeners::new(&self.shared.dir).forget_all()
+        TrustedListeners::new(&self.shared.dir).forget_all()?;
+        let open = self.is_open();
+        let mut listeners = self.shared.listeners.lock().unwrap();
+        listeners.retain_mut(|l| {
+            if open {
+                // Still welcome without a code, just no longer paired.
+                l.paired = None;
+                true
+            } else {
+                l.paired.is_none()
+            }
+        });
+        Ok(())
     }
 
     /// Listeners that entered the code once and may come back without it.
@@ -143,6 +162,16 @@ impl Server {
         let mut listeners = self.shared.listeners.lock().unwrap();
         listeners.retain(|l| l.paired.as_deref() != Some(id));
         Ok(())
+    }
+
+    /// The devices listening now, each with its paired entry
+    /// ([Paired::id]) or None when it came in without a code (open).
+    pub fn listening(&self) -> Vec<(Option<String>, String)> {
+        let listeners = self.shared.listeners.lock().unwrap();
+        listeners
+            .iter()
+            .map(|l| (l.paired.clone(), l.name.clone()))
+            .collect()
     }
 
     /// Names of the devices listening now.

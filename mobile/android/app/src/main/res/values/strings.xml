@@ -201,9 +201,12 @@
     <string name="cast_waiting">En attente de musique…</string>
     <string name="cast_stop_listening">Arrêter l\'écoute</string>
     <string name="cast_switch_channel">Changer de canal</string>
-    <string name="cast_paired_title">Appareils appairés</string>
-    <string name="cast_paired_none">Aucun appareil n\'a encore entré le code.</string>
-    <string name="cast_paired_listening">À l\'écoute</string>
+    <string name="cast_devices_title">Appareils</string>
+    <string name="cast_devices_none">Aucun appareil pour l\'instant.</string>
+    <string name="cast_device_paired">Appairé</string>
+    <string name="cast_device_listening">À l\'écoute</string>
+    <string name="cast_device_listening_open">À l\'écoute (ouvert)</string>
+    <string name="cast_forget_all">Oublier tous les appareils</string>
     <string name="cast_forget_one">Oublier %1$s</string>
     <string name="cast_wrong_code">Code incorrect, réessaie.</string>
     <string name="cast_code_changed">Trop d\'essais : un nouveau code est affiché sur l\'appareil.</string>

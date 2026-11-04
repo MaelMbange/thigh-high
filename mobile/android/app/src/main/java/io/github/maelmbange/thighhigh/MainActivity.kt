@@ -609,6 +609,7 @@ class MainActivity : ComponentActivity() {
                 onListen = { cast.clearNotice(); cast.startBrowsing() },
                 onSetOpen = cast::setOpen,
                 onForgetPaired = cast::forgetPaired,
+                onForgetAllPaired = cast::forgetAllPaired,
                 onStopBroadcast = cast::stopBroadcast,
                 onConnect = { cast.clearNotice(); cast.connect(it) },
                 onSubmitCode = { cast.clearNotice(); cast.submitCode(it) },

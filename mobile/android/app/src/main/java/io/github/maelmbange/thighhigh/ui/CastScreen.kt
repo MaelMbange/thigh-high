@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -65,6 +67,7 @@ import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.cast.CastNotice
 import io.github.maelmbange.thighhigh.cast.CastUi
 import io.github.maelmbange.thighhigh.cast.Found
+import io.github.maelmbange.thighhigh.cast.CastListener
 import io.github.maelmbange.thighhigh.cast.PairedDevice
 import io.github.maelmbange.thighhigh.playback.PulseSource
 import androidx.compose.foundation.rememberScrollState
@@ -92,6 +95,7 @@ fun CastScreen(
     onListen: () -> Unit,
     onSetOpen: (Boolean) -> Unit,
     onForgetPaired: (String) -> Unit,
+    onForgetAllPaired: () -> Unit,
     onStopBroadcast: () -> Unit,
     onConnect: (Found) -> Unit,
     onSubmitCode: (String) -> Unit,
@@ -139,7 +143,7 @@ fun CastScreen(
                 when (state) {
                     CastUi.Idle -> Choice(onBroadcast, onListen)
                     is CastUi.ReadyToBroadcast, is CastUi.Broadcasting ->
-                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onForgetPaired, onStopBroadcast)
+                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onForgetPaired, onForgetAllPaired, onStopBroadcast)
                     is CastUi.Browsing -> Browsing(state, onConnect, onBack)
                     is CastUi.Connecting -> Waiting(stringResource(R.string.cast_connecting, state.name), onCancel)
                     is CastUi.AskingCode -> AskCode(state, onSubmitCode, onCancel)
@@ -243,6 +247,7 @@ private fun Broadcast(
     onSetOpen: (Boolean) -> Unit,
     onStart: () -> Unit,
     onForgetPaired: (String) -> Unit,
+    onForgetAll: () -> Unit,
     onStop: () -> Unit,
 ) {
     val running = state as? CastUi.Broadcasting
@@ -265,17 +270,6 @@ private fun Broadcast(
                 Text(stringResource(R.string.cast_not_visible), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
             }
             OpenSwitch(open, onSetOpen)
-            Text(
-                stringResource(
-                    when {
-                        open -> R.string.cast_open_on
-                        running != null -> R.string.cast_open_off
-                        else -> R.string.cast_open_off_before
-                    }
-                ),
-                color = TextColors.info,
-                textAlign = TextAlign.Center,
-            )
             if (running != null) {
                 if (!open) {
                     Column(
@@ -297,17 +291,11 @@ private fun Broadcast(
                         )
                     }
                 }
-                Text(
-                    if (running.listeners.isEmpty()) stringResource(R.string.cast_nobody)
-                    else stringResource(R.string.cast_listeners, running.listeners.joinToString(", ")),
-                    color = if (running.listeners.isEmpty()) TextColors.info else TextColors.genre,
-                    textAlign = TextAlign.Center,
-                )
             }
             if (!hasTrack) {
                 Text(stringResource(R.string.cast_play_something), color = TextColors.info, textAlign = TextAlign.Center)
             }
-            if (running != null) PairedList(running.paired, running.listeners, onForgetPaired)
+            if (running != null) DeviceList(running.paired, running.listeners, onForgetPaired, onForgetAll)
         }
         if (running != null) {
             Button(onClick = onStop, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(stringResource(R.string.cast_stop_broadcast)) }
@@ -320,40 +308,69 @@ private fun Broadcast(
     }
 }
 
-/** The devices that typed the code once, each with its own "forget". */
+/**
+ * Every device of this broadcast in one list: the paired ones (listening or
+ * not), each with its own "forget", then those listening without the code
+ * (open), marked "(ouvert)". A paired device listening keeps its one line.
+ */
 @Composable
-private fun PairedList(paired: List<PairedDevice>, listening: List<String>, onForget: (String) -> Unit) {
+private fun DeviceList(
+    paired: List<PairedDevice>,
+    listening: List<CastListener>,
+    onForget: (String) -> Unit,
+    onForgetAll: () -> Unit,
+) {
+    val listeningIds = listening.mapNotNull { it.pairedId }.toSet()
+    val guests = listening.filter { it.pairedId == null || paired.none { p -> p.id == it.pairedId } }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(vertical = 8.dp)) {
         Text(
-            stringResource(R.string.cast_paired_title),
+            stringResource(R.string.cast_devices_title),
             Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             color = TextColors.title,
             style = MaterialTheme.typography.titleSmall,
         )
-        if (paired.isEmpty()) {
+        if (paired.isEmpty() && guests.isEmpty()) {
             Text(
-                stringResource(R.string.cast_paired_none),
+                stringResource(R.string.cast_devices_none),
                 Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 color = TextColors.info,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
         paired.forEach { device ->
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp).testTag("castPaired"),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.Smartphone, null, tint = MaterialTheme.colorScheme.secondary)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(device.name.ifEmpty { "?" }, color = TextColors.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (device.name in listening) {
-                        Text(stringResource(R.string.cast_paired_listening), color = TextColors.genre, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                IconButton(onClick = { onForget(device.id) }) {
-                    Icon(Icons.Default.Delete, stringResource(R.string.cast_forget_one, device.name))
-                }
+            DeviceRow(
+                device.name,
+                stringResource(if (device.id in listeningIds) R.string.cast_device_listening else R.string.cast_device_paired),
+                listening = device.id in listeningIds,
+                onForget = { onForget(device.id) },
+            )
+        }
+        guests.forEach { guest ->
+            DeviceRow(guest.name, stringResource(R.string.cast_device_listening_open), listening = true, onForget = null)
+        }
+        if (paired.isNotEmpty()) {
+            TextButton(onClick = onForgetAll, modifier = Modifier.padding(horizontal = 8.dp).testTag("castForgetAll")) {
+                Text(stringResource(R.string.cast_forget_all))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceRow(name: String, status: String, listening: Boolean, onForget: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(start = 16.dp, end = 4.dp).testTag("castDeviceRow"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Smartphone, null, tint = if (listening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name.ifEmpty { "?" }, color = TextColors.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(status, color = if (listening) TextColors.genre else TextColors.info, style = MaterialTheme.typography.bodySmall)
+        }
+        if (onForget != null) {
+            IconButton(onClick = onForget) {
+                Icon(Icons.Default.Delete, stringResource(R.string.cast_forget_one, name))
             }
         }
     }

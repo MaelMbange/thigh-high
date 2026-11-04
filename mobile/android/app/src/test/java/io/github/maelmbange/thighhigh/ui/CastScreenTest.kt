@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.runtime.snapshots.Snapshot
+import io.github.maelmbange.thighhigh.cast.CastListener
 import io.github.maelmbange.thighhigh.cast.CastNotice
 import io.github.maelmbange.thighhigh.cast.CastTrack
 import io.github.maelmbange.thighhigh.cast.CastUi
@@ -53,6 +54,7 @@ class CastScreenTest {
                 onListen = { calls += "listen" },
                 onSetOpen = { calls += "open:$it" },
                 onForgetPaired = { calls += "forget:$it" },
+                onForgetAllPaired = { calls += "forgetAll" },
                 onStopBroadcast = { calls += "stop" },
                 onConnect = { calls += "connect:${it.name}" },
                 onSubmitCode = { calls += "code:$it" },
@@ -86,18 +88,22 @@ class CastScreenTest {
 
     @Test
     fun broadcastShowsTheCodeUntilOpen() {
-        ui = CastUi.Broadcasting("Pixel", open = false, code = "123456", listeners = listOf("Wetwork"), visible = true)
+        ui = CastUi.Broadcasting(
+            "Pixel", open = false, code = "123456", listeners = listOf(CastListener("aa", "Wetwork")), visible = true,
+            paired = listOf(PairedDevice("aa", "Wetwork")),
+        )
         show()
         rule.onNodeWithTag("castCode").assertExists()
         rule.onNodeWithText("123 456").assertExists()
-        rule.onNodeWithText("À l'écoute : Wetwork").assertExists()
+        rule.onNodeWithText("Wetwork").assertExists()
+        rule.onNodeWithText("À l'écoute").assertExists()
         rule.onNodeWithTag("castOpen").performClick()
         assertEquals(listOf("open:true"), calls)
 
         ui = CastUi.Broadcasting("Pixel", open = true, code = "123456", listeners = emptyList(), visible = true)
         Snapshot.sendApplyNotifications()
         rule.mainClock.advanceTimeBy(1_000)
-        rule.onNodeWithText("Tout le monde sur ce réseau peut écouter, sans code.").assertExists()
+        rule.onNodeWithText("Activé : tout le monde peut écouter, sans code").assertExists()
         rule.onNodeWithTag("castCode").assertDoesNotExist()
         rule.onNodeWithText("Arrêter la diffusion").performClick()
         assertEquals("stop", calls.last())
@@ -106,13 +112,19 @@ class CastScreenTest {
     @Test
     fun pairedDevicesAreForgottenOneByOne() {
         ui = CastUi.Broadcasting(
-            "Pixel", open = false, code = "123456", listeners = listOf("Wetwork"), visible = true,
+            "Pixel", open = true, code = "123456", visible = true,
+            listeners = listOf(CastListener("aa", "Wetwork"), CastListener(null, "Invité")),
             paired = listOf(PairedDevice("aa", "Wetwork"), PairedDevice("bb", "Tablette")),
         )
         show()
-        rule.onAllNodesWithTag("castPaired").assertCountEquals(2)
+        // One line per device: the paired one listening keeps its line.
+        rule.onAllNodesWithTag("castDeviceRow").assertCountEquals(3)
+        rule.onNodeWithText("À l'écoute (ouvert)").assertExists()
+        rule.onNodeWithText("Appairé").assertExists()
+        rule.onNodeWithContentDescription("Oublier Invité").assertDoesNotExist()
         rule.onNodeWithContentDescription("Oublier Tablette").performClick()
-        assertEquals(listOf("forget:bb"), calls)
+        rule.onNodeWithTag("castForgetAll").performClick()
+        assertEquals(listOf("forget:bb", "forgetAll"), calls)
     }
 
     @Test

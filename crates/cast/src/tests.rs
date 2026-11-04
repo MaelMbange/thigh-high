@@ -175,6 +175,50 @@ fn one_paired_listener_is_forgotten() {
 }
 
 #[test]
+fn closing_lets_go_of_listeners_without_code() {
+    let dir = temp_dir("closing");
+    let server = Server::start(&dir.join("pc"), "PC", false).unwrap();
+    let phone = dir.join("phone");
+    let Connected::NeedsCode(pending) = client::connect(&phone, addr(&server), "Phone").unwrap()
+    else {
+        panic!("no code asked");
+    };
+    let mut paired = pending.pair(&server.code()).unwrap();
+    server.set_open(true);
+    let mut guest = ready(client::connect(&dir.join("guest"), addr(&server), "Guest").unwrap());
+    wait_listeners(&server, 2);
+    let listening = server.listening();
+    assert!(
+        listening
+            .iter()
+            .any(|(id, name)| id.is_some() && name == "Phone")
+    );
+    assert!(
+        listening
+            .iter()
+            .any(|(id, name)| id.is_none() && name == "Guest")
+    );
+
+    // Open to code: the guest goes, the paired phone stays.
+    server.set_open(false);
+    loop {
+        match guest.receive() {
+            Ok(Event::Ended) | Err(_) => break,
+            Ok(_) => continue,
+        }
+    }
+    wait_listeners(&server, 1);
+    assert_eq!(server.listeners(), ["Phone"]);
+    assert!(paired.receive().is_ok());
+
+    // Forgetting everyone, closed: the phone goes too.
+    server.forget_listeners().unwrap();
+    wait_listeners(&server, 0);
+    assert!(server.paired().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wrong_codes_change_the_code() {
     let dir = temp_dir("wrong");
     let server = Server::start(&dir.join("pc"), "PC", false).unwrap();

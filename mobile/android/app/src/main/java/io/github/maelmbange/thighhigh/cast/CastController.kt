@@ -57,6 +57,9 @@ data class CastTrack(
     val lyrics: Lyrics?,
 )
 
+/** A device listening now; [pairedId] is its entry among [PairedDevice]s, null if it came in open. */
+data class CastListener(val pairedId: String?, val name: String)
+
 /** A listener that entered the code once and comes back without it. */
 data class PairedDevice(val id: String, val name: String)
 
@@ -71,7 +74,7 @@ sealed interface CastUi {
         val name: String,
         val open: Boolean,
         val code: String,
-        val listeners: List<String>,
+        val listeners: List<CastListener>,
         val paired: List<PairedDevice> = emptyList(),
         /** False when the network announcement failed (nobody can find it). */
         val visible: Boolean,
@@ -182,7 +185,7 @@ class CastController(
                     _ui.update { ui ->
                         if (ui is CastUi.Broadcasting && server != 0L) ui.copy(
                             code = CastNative.serverCode(server),
-                            listeners = CastNative.serverListeners(server).lines().filter { it.isNotEmpty() },
+                            listeners = listeners(server),
                             paired = paired(server),
                         ) else ui
                     }
@@ -221,8 +224,9 @@ class CastController(
             return
         }
         val handle = server.takeIf { it != 0L } ?: return
+        // Closing lets go of the devices that came in without the code.
         CastNative.serverSetOpen(handle, open)
-        _ui.update { if (it is CastUi.Broadcasting) it.copy(open = open) else it }
+        _ui.update { if (it is CastUi.Broadcasting) it.copy(open = open, listeners = listeners(handle)) else it }
         announce(handle, open)
     }
 
@@ -232,11 +236,23 @@ class CastController(
             if (id.isEmpty()) null else PairedDevice(id, line.substringAfter('\t'))
         }
 
+    private fun listeners(handle: Long): List<CastListener> =
+        CastNative.serverListeners(handle).lines().filter { it.isNotEmpty() }.map { line ->
+            CastListener(line.substringBefore('\t').ifEmpty { null }, line.substringAfter('\t'))
+        }
+
+    /** Every paired device must type the code again (those listening go, unless open). */
+    fun forgetAllPaired() {
+        val handle = server.takeIf { it != 0L } ?: return
+        runCatching { CastNative.serverForgetListeners(handle) }
+        _ui.update { if (it is CastUi.Broadcasting) it.copy(paired = paired(handle), listeners = listeners(handle)) else it }
+    }
+
     /** That device must type the code again; it is let go if it listens now. */
     fun forgetPaired(id: String) {
         val handle = server.takeIf { it != 0L } ?: return
         runCatching { CastNative.serverForgetPaired(handle, id) }
-        _ui.update { if (it is CastUi.Broadcasting) it.copy(paired = paired(handle)) else it }
+        _ui.update { if (it is CastUi.Broadcasting) it.copy(paired = paired(handle), listeners = listeners(handle)) else it }
     }
 
     fun stopBroadcast() {

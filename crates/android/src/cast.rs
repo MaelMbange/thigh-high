@@ -127,15 +127,38 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
     unsafe { server(handle) }.set_open(open == JNI_TRUE);
 }
 
-/// Names of the devices listening, one per line.
+/// The devices listening, one per line: paired id (empty if none), a tab, the name.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverListeners<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass<'l>,
     handle: jlong,
 ) -> jstring {
-    let names = unsafe { server(handle) }.listeners().join("\n");
-    new_string(&mut env, &names)
+    let lines: Vec<String> = unsafe { server(handle) }
+        .listening()
+        .into_iter()
+        .map(|(id, name)| {
+            format!(
+                "{}\t{}",
+                id.unwrap_or_default(),
+                name.replace(['\t', '\n'], " ")
+            )
+        })
+        .collect();
+    new_string(&mut env, &lines.join("\n"))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serverForgetListeners<
+    'l,
+>(
+    mut env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    handle: jlong,
+) {
+    if let Err(err) = unsafe { server(handle) }.forget_listeners() {
+        throw(&mut env, err.to_string());
+    }
 }
 
 /// Paired listeners, one per line: id, a tab, then the name.
