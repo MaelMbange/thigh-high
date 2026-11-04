@@ -1,5 +1,6 @@
 package io.github.maelmbange.thighhigh.download
 
+import io.github.maelmbange.thighhigh.playback.fft
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.ln
@@ -124,50 +125,6 @@ class Fingerprint private constructor(
             for (v in x) variance += (v - mean) * (v - mean)
             val sd = sqrt(variance / x.size).takeIf { it > 1e-6 } ?: 1.0
             for (i in x.indices) x[i] = ((x[i] - mean) / sd).toFloat()
-        }
-
-        /** In-place radix-2 FFT; the size must be a power of two. */
-        private fun fft(re: FloatArray, im: FloatArray) {
-            val n = re.size
-            var j = 0
-            for (i in 1 until n) {
-                var bit = n shr 1
-                while (j and bit != 0) {
-                    j = j xor bit
-                    bit = bit shr 1
-                }
-                j = j or bit
-                if (i < j) {
-                    var t = re[i]; re[i] = re[j]; re[j] = t
-                    t = im[i]; im[i] = im[j]; im[j] = t
-                }
-            }
-            var len = 2
-            while (len <= n) {
-                val angle = -2 * PI / len
-                val wRe = cos(angle).toFloat()
-                val wIm = sin(angle).toFloat()
-                var i = 0
-                while (i < n) {
-                    var uRe = 1f
-                    var uIm = 0f
-                    for (k in 0 until len / 2) {
-                        val a = i + k
-                        val b = a + len / 2
-                        val vRe = re[b] * uRe - im[b] * uIm
-                        val vIm = re[b] * uIm + im[b] * uRe
-                        re[b] = re[a] - vRe
-                        im[b] = im[a] - vIm
-                        re[a] += vRe
-                        im[a] += vIm
-                        val nextRe = uRe * wRe - uIm * wIm
-                        uIm = uRe * wIm + uIm * wRe
-                        uRe = nextRe
-                    }
-                    i += len
-                }
-                len = len shl 1
-            }
         }
     }
 }
