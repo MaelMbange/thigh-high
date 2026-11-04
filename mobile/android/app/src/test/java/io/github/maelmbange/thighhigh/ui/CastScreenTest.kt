@@ -79,9 +79,9 @@ class CastScreenTest {
         show()
         rule.onNodeWithTag("castCode").assertDoesNotExist()
         rule.onNodeWithTag("castOpen").performClick()
-        rule.onNodeWithText("Annuler").performClick()
+        rule.onNodeWithText("Annuler").assertDoesNotExist()
         rule.onNodeWithText("Démarrer la diffusion").performClick()
-        assertEquals(listOf("open:true", "cancelBroadcast", "start"), calls)
+        assertEquals(listOf("open:true", "start"), calls)
     }
 
     @Test

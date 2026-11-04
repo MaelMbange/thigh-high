@@ -594,7 +594,9 @@ class MainActivity : ComponentActivity() {
                 cast.stopBrowsing()
                 cast.cancelBroadcast()
             }
-            BackHandler(onBack = close)
+            BackHandler {
+                if (ui is io.github.maelmbange.thighhigh.cast.CastUi.ReadyToBroadcast) cast.cancelBroadcast() else close()
+            }
             CastScreen(
                 ui = ui,
                 notice = notice,

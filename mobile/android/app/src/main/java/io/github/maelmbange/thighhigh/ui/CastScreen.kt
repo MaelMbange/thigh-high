@@ -39,7 +39,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -88,6 +87,7 @@ fun CastScreen(
     onClose: () -> Unit,
     onBroadcast: () -> Unit,
     onStartBroadcast: () -> Unit,
+    /** The back arrow before the start: back to Diffuser / S'abonner. */
     onCancelBroadcast: () -> Unit,
     onListen: () -> Unit,
     onSetOpen: (Boolean) -> Unit,
@@ -113,7 +113,7 @@ fun CastScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.cast), color = TextColors.title) },
                 navigationIcon = {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = if (ui is CastUi.ReadyToBroadcast) onCancelBroadcast else onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
                     }
                 },
@@ -139,7 +139,7 @@ fun CastScreen(
                 when (state) {
                     CastUi.Idle -> Choice(onBroadcast, onListen)
                     is CastUi.ReadyToBroadcast, is CastUi.Broadcasting ->
-                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onCancelBroadcast, onForgetPaired, onStopBroadcast)
+                        Broadcast(state, hasTrack, onSetOpen, onStartBroadcast, onForgetPaired, onStopBroadcast)
                     is CastUi.Browsing -> Browsing(state, onConnect, onBack)
                     is CastUi.Connecting -> Waiting(stringResource(R.string.cast_connecting, state.name), onCancel)
                     is CastUi.AskingCode -> AskCode(state, onSubmitCode, onCancel)
@@ -227,14 +227,7 @@ private fun OpenSwitch(open: Boolean, onSetOpen: (Boolean) -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        Switch(
-            open,
-            onCheckedChange = onSetOpen,
-            modifier = Modifier.testTag("castOpen"),
-            thumbContent = {
-                Icon(if (open) Icons.Default.LockOpen else Icons.Default.Lock, null, Modifier.size(SwitchDefaults.IconSize))
-            },
-        )
+        Switch(open, onCheckedChange = onSetOpen, modifier = Modifier.testTag("castOpen"))
     }
 }
 
@@ -249,7 +242,6 @@ private fun Broadcast(
     hasTrack: Boolean,
     onSetOpen: (Boolean) -> Unit,
     onStart: () -> Unit,
-    onCancel: () -> Unit,
     onForgetPaired: (String) -> Unit,
     onStop: () -> Unit,
 ) {
@@ -320,11 +312,9 @@ private fun Broadcast(
         if (running != null) {
             Button(onClick = onStop, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(stringResource(R.string.cast_stop_broadcast)) }
         } else {
+            // No "Annuler" here: the back arrow leaves without broadcasting.
             Button(onClick = onStart, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("castStart")) {
                 Text(stringResource(R.string.cast_start_broadcast))
-            }
-            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.cast_cancel))
             }
         }
     }
