@@ -1,0 +1,16 @@
+[package]
+name = "thigh-high-cast"
+description = "Encrypted local network broadcasting (Diffuser / S'abonner) shared by the terminal and Android apps"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# mDNS discovery in Rust, for the terminal app. Android uses its own NsdManager.
+mdns = ["dep:mdns-sd"]
+
+[dependencies]
+mdns-sd = { version = "0.21", optional = true }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+spake2 = "0.4"

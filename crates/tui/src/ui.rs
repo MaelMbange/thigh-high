@@ -9,6 +9,7 @@ use ratatui::widgets::{
 };
 
 use crate::app::{App, Focus, Repeat, ToolsState};
+use crate::cast::Cast;
 use crate::cover::Rgb;
 use crate::filter::Field;
 use crate::visualizer;
@@ -33,7 +34,7 @@ fn colors(app: &App) -> Colors {
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    let help = help_line(app.focus, colors(app));
+    let help = help_line(app, colors(app));
     // The key list wraps onto a second row in narrow terminals.
     let help_height = if help.width() > frame.area().width as usize {
         2
@@ -72,6 +73,229 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     if app.confirm.is_some() {
         draw_confirm(frame, app);
+    }
+    if app.focus == Focus::Cast {
+        draw_cast(frame, app);
+    }
+}
+
+/// Groups digits by three: "123456" → "123 456".
+fn spaced_code(code: &str) -> String {
+    let (a, b) = code.split_at(code.len().min(3));
+    format!("{a} {b}")
+}
+
+/// The broadcast dialog: choose, broadcast, find a device, type its code, listen.
+fn draw_cast(frame: &mut Frame, app: &mut App) {
+    let colors = colors(app);
+    let [area] = Layout::horizontal([Constraint::Max(60)])
+        .flex(Flex::Center)
+        .areas(frame.area());
+    let [area] = Layout::vertical([Constraint::Length(14)])
+        .flex(Flex::Center)
+        .areas(area);
+    frame.render_widget(Clear, area);
+
+    let title = match &app.cast {
+        Some(Cast::Broadcasting(_)) => " Broadcasting ",
+        Some(Cast::Listening(_)) => " Listening ",
+        Some(Cast::Browsing(_) | Cast::Connecting { .. } | Cast::AskingCode(_)) => {
+            " Listen to a device "
+        }
+        _ => " Local network ",
+    };
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(colors.primary))
+        .title(Line::from(title).fg(colors.secondary).bold());
+    let inner = block.inner(area).inner(Margin::new(1, 0));
+    frame.render_widget(block, area);
+
+    let dim = |text: String| Line::from(text).dark_gray();
+    let button = |label: &str, selected: bool| {
+        let span = Span::from(format!("  {label}  "));
+        if selected {
+            span.fg(Color::Black).bg(colors.primary).bold()
+        } else {
+            span.fg(colors.secondary)
+        }
+    };
+
+    let Some(state) = &mut app.cast else {
+        return;
+    };
+    let lines: Vec<Line> = match state {
+        Cast::Menu { listen } => vec![
+            Line::from(""),
+            Line::from("Share your music with devices on this network,"),
+            Line::from("or listen to one of them, live like a radio."),
+            Line::from(""),
+            Line::from(vec![
+                button("Broadcast", !*listen),
+                Span::from("    "),
+                button("Listen", *listen),
+            ]),
+            Line::from(""),
+            dim("Encrypted. Only the sound, cover and lyrics are sent:".into()),
+            dim("no file can be downloaded.".into()),
+        ],
+        Cast::Broadcasting(broadcast) => {
+            let server = &broadcast.server;
+            let listeners = server.listeners();
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::from("Visible as "),
+                    Span::from(broadcast.name.clone())
+                        .fg(colors.secondary)
+                        .bold(),
+                    Span::from(format!("  (port {})", server.port())).dark_gray(),
+                ]),
+                Line::from(""),
+            ];
+            if server.is_open() {
+                lines.push(Line::from(vec![
+                    Span::from("Open: ").fg(colors.tertiary).bold(),
+                    Span::from("anyone on this network can listen"),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::from("Code for new devices: "),
+                    Span::from(spaced_code(&server.code()))
+                        .fg(colors.primary)
+                        .bold(),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(match listeners.len() {
+                0 => dim("Nobody is listening yet".into()),
+                n => Line::from(vec![
+                    Span::from(format!("{n} listening: ")).fg(colors.tertiary),
+                    Span::from(listeners.join(", ")),
+                ]),
+            });
+            if app.now_playing.is_none() {
+                lines.push(dim("Play a track: listeners hear what you hear.".into()));
+            }
+            if let Some(warning) = &broadcast.warning {
+                lines.push(Line::from(warning.clone()).red());
+            }
+            lines
+        }
+        Cast::Browsing(browse) => {
+            let [message_area, list_area] =
+                Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(inner);
+            let message = match (&browse.error, browse.found.is_empty()) {
+                (Some(err), _) => Line::from(err.clone()).red(),
+                (None, true) => dim("Searching for devices broadcasting on this network…".into()),
+                (None, false) => Line::from("Choose a device:"),
+            };
+            frame.render_widget(
+                Paragraph::new(message).wrap(Wrap { trim: true }),
+                message_area,
+            );
+            let items: Vec<ListItem> = browse
+                .found
+                .iter()
+                .map(|found| {
+                    let detail = match (found.compatible, found.open) {
+                        (false, _) => "  other version",
+                        (true, true) => "  open",
+                        (true, false) => "  code",
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::from(found.name.clone()),
+                        Span::from(detail).fg(colors.tertiary),
+                    ]))
+                })
+                .collect();
+            let list = List::new(items).highlight_style(
+                Style::new()
+                    .fg(Color::Black)
+                    .bg(colors.primary)
+                    .add_modifier(Modifier::BOLD),
+            );
+            frame.render_stateful_widget(list, list_area, &mut browse.state);
+            return;
+        }
+        Cast::Connecting { name, .. } => vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(format!("Connecting to {name}…")).centered(),
+        ],
+        Cast::AskingCode(ask) => {
+            let typed: String = (0..6)
+                .map(|i| ask.input.chars().nth(i).unwrap_or('_'))
+                .collect();
+            let mut lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::from("Type the code shown on "),
+                    Span::from(ask.name.clone()).fg(colors.secondary).bold(),
+                ])
+                .centered(),
+                Line::from(""),
+                Line::from(spaced_code(&typed))
+                    .fg(colors.primary)
+                    .bold()
+                    .centered(),
+                Line::from(""),
+                dim("It is only asked once for this device.".into()).centered(),
+            ];
+            if let Some(err) = &ask.error {
+                lines.push(Line::from(""));
+                lines.push(Line::from(err.clone()).red().centered());
+            }
+            lines
+        }
+        Cast::Listening(listen) => {
+            let mut lines = vec![Line::from(vec![
+                Span::from("From "),
+                Span::from(listen.name.clone()).fg(colors.secondary).bold(),
+                Span::from(if listen.playing { "" } else { "  (paused)" }).dark_gray(),
+            ])];
+            match &listen.track {
+                Some(track) => {
+                    lines.push(Line::from(track.title.clone()).fg(colors.primary).bold());
+                    lines.push(Line::from(track.artist.clone()).fg(colors.tertiary));
+                }
+                None => lines.push(dim("Waiting for music…".into())),
+            }
+            lines.push(Line::from(""));
+            lines.extend(lyric_lines(listen, colors));
+            lines
+        }
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+/// The line being sung, with the one before and after.
+fn lyric_lines(listen: &crate::cast::Listen, colors: Colors) -> Vec<Line<'static>> {
+    use thigh_high_cast::lyrics::Lyrics;
+    match &listen.lyrics {
+        Some(lyrics @ Lyrics::Synced(lines)) => {
+            let current = lyrics.current(listen.heard_ms());
+            let at = |i: Option<usize>| {
+                i.and_then(|i| lines.get(i))
+                    .map(|(_, text)| text.clone())
+                    .unwrap_or_default()
+            };
+            vec![
+                Line::from(at(current.and_then(|i| i.checked_sub(1))))
+                    .dark_gray()
+                    .centered(),
+                Line::from(at(current))
+                    .fg(colors.secondary)
+                    .bold()
+                    .centered(),
+                Line::from(at(Some(current.map_or(0, |i| i + 1))))
+                    .dark_gray()
+                    .centered(),
+            ]
+        }
+        Some(Lyrics::Plain(_)) => {
+            vec![Line::from("Lyrics (not synced) on the broadcaster").dark_gray()]
+        }
+        None => Vec::new(),
     }
 }
 
@@ -300,7 +524,15 @@ fn draw_downloads(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_player(frame: &mut Frame, app: &mut App, area: Rect) {
     let colors = colors(app);
     // The showcase panel always wears the cover's main color.
-    let block = panel("Now playing", false, colors).border_style(Style::new().fg(colors.primary));
+    let title = match (app.broadcasting(), app.listening()) {
+        (Some(b), _) => match b.server.listeners().len() {
+            0 => "Now playing · broadcasting".to_string(),
+            n => format!("Now playing · broadcasting to {n}"),
+        },
+        (_, Some(listen)) => format!("Listening to {}", listen.name),
+        _ => "Now playing".to_string(),
+    };
+    let block = panel(title, false, colors).border_style(Style::new().fg(colors.primary));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -350,6 +582,10 @@ fn draw_player(frame: &mut Frame, app: &mut App, area: Rect) {
     buf[(area.right() - 1, info_section.y)].set_symbol("┤");
 
     let app = &*app;
+    if let (Some(listen), Some(player)) = (app.listening(), app.player.as_ref()) {
+        draw_listening(frame, listen, player, colors, info_inner);
+        return;
+    }
     let (Some(track), Some(player)) = (app.current_track(), app.player.as_ref()) else {
         let idle = Paragraph::new("Nothing playing").dark_gray().centered();
         let [middle] = Layout::vertical([Constraint::Length(1)])
@@ -419,13 +655,80 @@ fn draw_player(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Paragraph::new(controls).centered(), controls_area);
 }
 
+/// The track details while listening to another device.
+fn draw_listening(
+    frame: &mut Frame,
+    listen: &crate::cast::Listen,
+    player: &crate::player::Player,
+    colors: Colors,
+    area: Rect,
+) {
+    let [info_area, gauge_area, controls_area] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area.inner(Margin::new(2, 0)));
+    let Some(track) = &listen.track else {
+        frame.render_widget(
+            Paragraph::new(format!("Waiting for {}…", listen.name))
+                .dark_gray()
+                .centered(),
+            info_area,
+        );
+        return;
+    };
+    let subtitle = [track.artist.as_str(), track.album.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(track.title.clone()).fg(colors.primary).bold(),
+            Line::from(subtitle).fg(colors.tertiary),
+        ])
+        .centered(),
+        info_area,
+    );
+    let position = Duration::from_millis(listen.heard_ms());
+    let total = Duration::from_millis(track.duration_ms);
+    let ratio = if total.is_zero() {
+        0.0
+    } else {
+        position.as_secs_f64() / total.as_secs_f64()
+    };
+    let gauge = LineGauge::default()
+        .ratio(ratio.clamp(0.0, 1.0))
+        .label(format!(
+            "{} / {}",
+            format_time(position),
+            format_time(total)
+        ))
+        .filled_style(Style::new().fg(colors.secondary))
+        .unfilled_style(Style::new().dark_gray());
+    frame.render_widget(gauge, gauge_area);
+    let state = if player.is_paused() || !listen.playing {
+        "⏸  Paused"
+    } else {
+        "📻  Live"
+    };
+    let controls = Line::from(vec![
+        Span::from(state).fg(colors.secondary).bold(),
+        Span::from("    Volume ").dark_gray(),
+        Span::from(format!("{:.0}%", player.volume() * 100.0)).fg(colors.tertiary),
+        Span::from("    c lyrics").dark_gray(),
+    ]);
+    frame.render_widget(Paragraph::new(controls).centered(), controls_area);
+}
+
 fn format_time(duration: Duration) -> String {
     let secs = duration.as_secs();
     format!("{}:{:02}", secs / 60, secs % 60)
 }
 
-fn help_line(focus: Focus, colors: Colors) -> Line<'static> {
-    let keys: &[(&str, &str)] = match focus {
+fn help_line(app: &App, colors: Colors) -> Line<'static> {
+    let keys: &[(&str, &str)] = match app.focus {
         Focus::Library => &[
             ("/", "URL"),
             ("Enter", "play"),
@@ -439,6 +742,7 @@ fn help_line(focus: Focus, colors: Colors) -> Line<'static> {
             ("g", "genres"),
             ("o", "loop"),
             ("d", "delete"),
+            ("c", "broadcast"),
             ("r", "rescan"),
             ("q", "quit"),
         ],
@@ -456,6 +760,31 @@ fn help_line(focus: Focus, colors: Colors) -> Line<'static> {
             ("x", "clear"),
             ("Esc", "close"),
         ],
+        Focus::Cast => match &app.cast {
+            Some(Cast::Menu { .. }) | None => &[
+                ("←→", "choose"),
+                ("Enter", "start"),
+                ("b", "broadcast"),
+                ("s", "listen"),
+                ("Esc", "close"),
+            ],
+            Some(Cast::Broadcasting(_)) => &[
+                ("o", "open/code"),
+                ("f", "forget paired"),
+                ("Space", "pause"),
+                ("x", "stop broadcast"),
+                ("Esc", "hide"),
+            ],
+            Some(Cast::Browsing(_)) => &[("↑↓", "device"), ("Enter", "listen"), ("Esc", "back")],
+            Some(Cast::Connecting { .. }) => &[("Esc", "cancel")],
+            Some(Cast::AskingCode(_)) => &[("0-9", "code"), ("Enter", "send"), ("Esc", "cancel")],
+            Some(Cast::Listening(_)) => &[
+                ("Space", "pause"),
+                ("+/-", "vol"),
+                ("x", "stop listening"),
+                ("Esc", "hide"),
+            ],
+        },
     };
     // Keys take the three palette colors in turn.
     let key_colors = [colors.primary, colors.secondary, colors.tertiary];

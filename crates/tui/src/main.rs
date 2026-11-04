@@ -1,4 +1,5 @@
 mod app;
+mod cast;
 mod download;
 mod genre;
 mod library;

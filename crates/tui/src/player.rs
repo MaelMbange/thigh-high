@@ -4,9 +4,9 @@ use std::io::{self, Read};
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -16,6 +16,9 @@ use rodio::{ChannelCount, DeviceSinkBuilder, MixerDeviceSink, SampleRate, Source
 
 use crate::tools;
 use crate::visualizer::Tap;
+
+/// Where the played audio also goes while broadcasting.
+pub type CastFeed = Arc<Mutex<Option<Arc<thigh_high_cast::Server>>>>;
 
 const CHANNELS: ChannelCount = NonZero::new(2).unwrap();
 /// Samples per chunk sent from the decoder thread (~45 ms of stereo audio).
@@ -37,6 +40,7 @@ pub struct Player {
     /// Bass boost in dB, shared with the decoder so a restart picks it up.
     bass: Arc<AtomicU8>,
     tap: Tap,
+    cast: CastFeed,
 }
 
 impl Player {
@@ -53,7 +57,25 @@ impl Player {
             sample_rate,
             bass: Arc::new(AtomicU8::new(0)),
             tap: Tap::new(sample_rate.get()),
+            cast: Arc::default(),
         })
+    }
+
+    /// The output device's rate, which received broadcasts are converted to.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate.get()
+    }
+
+    /// Starts or stops sending the played audio to a broadcast.
+    pub fn set_cast(&self, server: Option<Arc<thigh_high_cast::Server>>) {
+        *self.cast.lock().unwrap() = server;
+    }
+
+    /// Plays a live source (a broadcast being listened to) instead of a file.
+    pub fn play_source(&self, source: impl Source + Send + 'static) {
+        self.output.clear();
+        self.output.append(source);
+        self.output.play();
     }
 
     pub fn play(&self, ffmpeg: &Path, file: &Path, duration: Option<Duration>) -> Result<()> {
@@ -64,6 +86,7 @@ impl Player {
             self.sample_rate,
             self.bass.clone(),
             self.tap.clone(),
+            self.cast.clone(),
         )?;
         // `clear` also pauses, so resume afterwards.
         self.output.clear();
@@ -147,6 +170,7 @@ struct FfmpegSource {
     sample_rate: SampleRate,
     bass: Arc<AtomicU8>,
     tap: Tap,
+    cast: CastFeed,
     chunks: Receiver<Vec<f32>>,
     chunk: Vec<f32>,
     index: usize,
@@ -162,6 +186,7 @@ impl FfmpegSource {
         sample_rate: SampleRate,
         bass: Arc<AtomicU8>,
         tap: Tap,
+        cast: CastFeed,
     ) -> io::Result<Self> {
         let chunks = decode(
             ffmpeg,
@@ -177,6 +202,7 @@ impl FfmpegSource {
             sample_rate,
             bass,
             tap,
+            cast,
             chunks,
             chunk: Vec::new(),
             index: 0,
@@ -215,6 +241,12 @@ impl Iterator for FfmpegSource {
                 Ok(chunk) => {
                     // Hand each chunk to the visualizer as it starts playing.
                     self.tap.push(&chunk);
+                    // And to the listeners; skipped rather than waited for.
+                    if let Ok(cast) = self.cast.try_lock()
+                        && let Some(server) = cast.as_ref()
+                    {
+                        server.push_f32(&chunk, CHANNELS.get() as usize, self.sample_rate.get());
+                    }
                     self.chunk = chunk;
                     self.index = 0;
                 }

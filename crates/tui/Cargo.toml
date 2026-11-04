@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 thigh-high-core = { path = "../core" }
+thigh-high-cast = { path = "../cast", features = ["mdns"] }
+image.workspace = true
 color-eyre = "0.6.5"
 dirs = "7.0.0"
 lofty.workspace = true

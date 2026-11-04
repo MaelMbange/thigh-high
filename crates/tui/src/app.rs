@@ -7,6 +7,7 @@ use color_eyre::Result;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 
+use crate::cast::{self, Broadcast, Browse, Cast, CastEvent, Listen};
 use crate::cover::{self, Palette};
 use crate::download;
 use crate::filter::{self, Field, Filter};
@@ -24,6 +25,8 @@ pub enum Focus {
     Filter,
     /// Asking whether to delete a track.
     ConfirmDelete,
+    /// The broadcast dialog (Broadcast / Listen) is open.
+    Cast,
 }
 
 /// What happens when a track ends.
@@ -97,6 +100,7 @@ pub enum AppEvent {
         path: PathBuf,
         result: Result<Option<String>, String>,
     },
+    Cast(CastEvent),
 }
 
 pub enum ToolsState {
@@ -122,6 +126,8 @@ pub struct App {
     pub filter: Option<Filter>,
     pub picker: Option<FilterPicker>,
     pub confirm: Option<ConfirmDelete>,
+    /// Broadcasting or listening on the local network, or choosing to.
+    pub cast: Option<Cast>,
     pub repeat: Repeat,
     /// Selection within `visible`.
     pub list_state: ListState,
@@ -178,6 +184,7 @@ impl App {
             filter: None,
             picker: None,
             confirm: None,
+            cast: None,
             repeat: Repeat::default(),
             list_state,
             now_playing: None,
@@ -255,8 +262,10 @@ impl App {
                     self.status = format!("Download failed ({label}): {error}");
                 }
                 AppEvent::GenreDetected { path, result } => self.genre_detected(path, result),
+                AppEvent::Cast(event) => self.cast_event(event),
             }
         }
+        self.update_cast();
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -269,6 +278,7 @@ impl App {
             Focus::Library => self.handle_library_key(key),
             Focus::Filter => self.handle_picker_key(key),
             Focus::ConfirmDelete => self.handle_confirm_key(key),
+            Focus::Cast => self.handle_cast_key(key),
         }
     }
 
@@ -309,6 +319,12 @@ impl App {
                 self.status = format!("Loop: {}", self.repeat.label());
             }
             KeyCode::Char('d') | KeyCode::Delete => self.ask_delete(),
+            KeyCode::Char('c') => {
+                if self.cast.is_none() {
+                    self.cast = Some(Cast::Menu { listen: false });
+                }
+                self.focus = Focus::Cast;
+            }
             KeyCode::Char('v') => {
                 self.visual = self.visual.next();
                 self.status = format!("Animation: {}", self.visual.label());
@@ -541,8 +557,16 @@ impl App {
             self.status = "Still setting up ffmpeg, try again in a moment".into();
             return;
         };
+        if let Some(Cast::Listening(listen)) = &self.cast {
+            // Playing our own music ends listening to someone else's.
+            listen.stop();
+            self.cast = None;
+        }
         match player.play(&tools.ffmpeg, &track.path, track.duration) {
             Ok(()) => {
+                if let Some(Cast::Broadcasting(broadcast)) = &self.cast {
+                    broadcast.server.set_track(cast::track_info(track));
+                }
                 self.palette = cover::cover_art(&track.path)
                     .and_then(|art| cover::palette(&art))
                     .unwrap_or_default();
@@ -751,6 +775,298 @@ impl App {
             .position(|&i| self.tracks[i].path == path)
         {
             self.list_state.select(Some(i));
+        }
+    }
+
+    pub fn listening(&self) -> Option<&Listen> {
+        match &self.cast {
+            Some(Cast::Listening(listen)) => Some(listen),
+            _ => None,
+        }
+    }
+
+    pub fn broadcasting(&self) -> Option<&Broadcast> {
+        match &self.cast {
+            Some(Cast::Broadcasting(broadcast)) => Some(broadcast),
+            _ => None,
+        }
+    }
+
+    /// Every frame: tells listeners where playback is, refreshes the list
+    /// of broadcasters.
+    fn update_cast(&mut self) {
+        let playing = self.now_playing.is_some();
+        let (position, paused) = self.player.as_ref().map_or((0, true), |p| {
+            (p.position().as_millis() as u64, p.is_paused())
+        });
+        match &mut self.cast {
+            Some(Cast::Broadcasting(broadcast)) => {
+                broadcast.server.set_position(position, playing && !paused);
+            }
+            Some(Cast::Browsing(browse)) => browse.refresh(),
+            _ => {}
+        }
+    }
+
+    fn close_cast_dialog(&mut self) {
+        self.focus = Focus::Library;
+        // Only a running broadcast or listening survives the dialog.
+        if matches!(self.cast, Some(Cast::Menu { .. } | Cast::Browsing(_))) {
+            self.cast = None;
+        }
+    }
+
+    fn handle_cast_key(&mut self, key: KeyEvent) {
+        let Some(state) = &mut self.cast else {
+            self.focus = Focus::Library;
+            return;
+        };
+        match state {
+            Cast::Menu { listen } => match key.code {
+                KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Tab
+                | KeyCode::BackTab
+                | KeyCode::Char('h')
+                | KeyCode::Char('l') => *listen = !*listen,
+                KeyCode::Char('b') => self.start_broadcast(),
+                KeyCode::Char('s') => self.start_browsing(),
+                KeyCode::Enter if *listen => self.start_browsing(),
+                KeyCode::Enter => self.start_broadcast(),
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') => self.close_cast_dialog(),
+                _ => {}
+            },
+            Cast::Broadcasting(broadcast) => match key.code {
+                KeyCode::Char('o') => {
+                    broadcast.toggle_open();
+                    self.status = if broadcast.server.is_open() {
+                        "Broadcast open: anyone on the network can listen".into()
+                    } else {
+                        "Broadcast protected: new listeners need the code".into()
+                    };
+                }
+                KeyCode::Char('f') => {
+                    self.status = match broadcast.server.forget_listeners() {
+                        Ok(()) => "Paired devices forgotten: they'll need the code again".into(),
+                        Err(err) => format!("Could not forget paired devices: {err}"),
+                    };
+                }
+                KeyCode::Char('x') => {
+                    broadcast.server.stop();
+                    if let Some(player) = &self.player {
+                        player.set_cast(None);
+                    }
+                    self.cast = Some(Cast::Menu { listen: false });
+                    self.status = "Broadcast stopped".into();
+                }
+                KeyCode::Char(' ') => self.toggle_pause(),
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') => self.close_cast_dialog(),
+                _ => {}
+            },
+            Cast::Browsing(browse) => match key.code {
+                KeyCode::Down | KeyCode::Char('j') => browse.state.select_next(),
+                KeyCode::Up | KeyCode::Char('k') => browse.state.select_previous(),
+                KeyCode::Enter => {
+                    if let Some(found) = browse.selected().cloned() {
+                        if !found.compatible {
+                            browse.error =
+                                Some(format!("{} runs another version of thigh-high", found.name));
+                            return;
+                        }
+                        self.cast = Some(cast::connect(&found, self.tx.clone(), None));
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('q') => self.cast = Some(Cast::Menu { listen: true }),
+                _ => {}
+            },
+            Cast::Connecting { closer, .. } => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+                    if let Some(closer) = closer {
+                        closer.close();
+                    }
+                    self.cast = Some(Cast::Menu { listen: true });
+                }
+            }
+            Cast::AskingCode(ask) => match key.code {
+                KeyCode::Char(c) if c.is_ascii_digit() && ask.input.len() < 6 => ask.input.push(c),
+                KeyCode::Backspace => {
+                    ask.input.pop();
+                }
+                KeyCode::Enter if ask.can_submit() => {
+                    let closer = cast::submit_code(ask, self.tx.clone());
+                    let (name, found) = (ask.name.clone(), ask.found.clone());
+                    self.cast = Some(Cast::Connecting {
+                        name,
+                        found,
+                        closer,
+                        error: None,
+                    });
+                }
+                KeyCode::Esc => self.cast = Some(Cast::Menu { listen: true }),
+                _ => {}
+            },
+            Cast::Listening(listen) => match key.code {
+                KeyCode::Char('x') => {
+                    listen.stop();
+                    if let Some(player) = &self.player {
+                        player.stop();
+                    }
+                    self.palette = Palette::default();
+                    self.cast = Some(Cast::Menu { listen: true });
+                    self.status = "Stopped listening".into();
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(player) = &self.player {
+                        player.toggle_pause();
+                    }
+                }
+                KeyCode::Char('+') | KeyCode::Char('=') => self.change_volume(0.05),
+                KeyCode::Char('-') => self.change_volume(-0.05),
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') => self.close_cast_dialog(),
+                _ => {}
+            },
+        }
+    }
+
+    fn start_broadcast(&mut self) {
+        let Some(player) = &self.player else {
+            self.status = "No audio output available".into();
+            return;
+        };
+        match Broadcast::start(&cast::device_name(), false) {
+            Ok(broadcast) => {
+                player.set_cast(Some(broadcast.server.clone()));
+                if let Some(track) = self.current_track() {
+                    broadcast.server.set_track(cast::track_info(track));
+                }
+                self.status = format!("Broadcasting as {}", broadcast.name);
+                self.cast = Some(Cast::Broadcasting(broadcast));
+            }
+            Err(err) => self.status = format!("Could not start broadcasting: {err}"),
+        }
+    }
+
+    fn start_browsing(&mut self) {
+        // Our own broadcast (if we just stopped one) isn't listed.
+        let own = thigh_high_cast::Identity::load_or_create(&cast::data_dir())
+            .ok()
+            .map(|identity| identity.short_id());
+        self.cast = Some(Cast::Browsing(Browse::start(own)));
+    }
+
+    fn cast_event(&mut self, event: CastEvent) {
+        use thigh_high_cast::Connected;
+        match event {
+            CastEvent::Connected(result) => {
+                let Some(Cast::Connecting {
+                    name, found, error, ..
+                }) = self.cast.take()
+                else {
+                    // Cancelled meanwhile: the connection is simply dropped.
+                    return;
+                };
+                self.cast = Some(match *result {
+                    Ok(Connected::Ready(session)) => return self.start_listening(session),
+                    Ok(Connected::NeedsCode(pending)) => {
+                        cast::ask_code(name, found, pending, error)
+                    }
+                    Err(err) => {
+                        let mut browse = Browse::start(None);
+                        browse.error = Some(format!("{name}: {err}"));
+                        Cast::Browsing(browse)
+                    }
+                });
+            }
+            CastEvent::Paired(result) => {
+                let Some(Cast::Connecting { name, found, .. }) = self.cast.take() else {
+                    return;
+                };
+                match *result {
+                    Ok(session) => self.start_listening(session),
+                    Err(
+                        err @ (thigh_high_cast::client::Error::WrongCode
+                        | thigh_high_cast::client::Error::CodeChanged),
+                    ) => {
+                        // The connection is spent: reconnect to ask again.
+                        let message = match err {
+                            thigh_high_cast::client::Error::CodeChanged => {
+                                "Too many wrong codes: type the new code shown"
+                            }
+                            _ => "Wrong code, try again",
+                        };
+                        self.cast =
+                            Some(cast::connect(&found, self.tx.clone(), Some(message.into())));
+                    }
+                    Err(err) => {
+                        let mut browse = Browse::start(None);
+                        browse.error = Some(format!("{name}: {err}"));
+                        self.cast = Some(Cast::Browsing(browse));
+                    }
+                }
+            }
+            CastEvent::Track(track) => {
+                if let Some(Cast::Listening(listen)) = &mut self.cast {
+                    self.palette = track
+                        .cover
+                        .as_deref()
+                        .and_then(cover::palette)
+                        .unwrap_or_default();
+                    listen.lyrics = track
+                        .lyrics
+                        .as_deref()
+                        .and_then(thigh_high_cast::lyrics::Lyrics::parse);
+                    self.status = format!("{} is playing: {}", listen.name, track.title);
+                    listen.track = Some(track);
+                }
+            }
+            CastEvent::State(playing) => {
+                if let Some(Cast::Listening(listen)) = &mut self.cast {
+                    listen.playing = playing;
+                }
+            }
+            CastEvent::Ended(reason) => {
+                if let Some(Cast::Listening(listen)) = &self.cast {
+                    self.status = match reason {
+                        None => format!("{} stopped broadcasting", listen.name),
+                        Some(err) => format!("Lost {}: {err}", listen.name),
+                    };
+                    if let Some(player) = &self.player {
+                        player.stop();
+                    }
+                    self.palette = Palette::default();
+                    self.cast = None;
+                    if self.focus == Focus::Cast {
+                        self.focus = Focus::Library;
+                    }
+                }
+            }
+        }
+    }
+
+    fn start_listening(&mut self, session: thigh_high_cast::Session) {
+        if self.player.is_none() {
+            self.status = "No audio output available".into();
+            self.cast = None;
+            return;
+        }
+        // Our own music stops; the broadcast takes over the speakers.
+        self.stop();
+        let Some(player) = &self.player else { return };
+        match cast::listen(
+            session,
+            player.sample_rate(),
+            player.tap().clone(),
+            self.tx.clone(),
+        ) {
+            Ok((listen, source)) => {
+                player.play_source(source);
+                self.status = format!("Listening to {}", listen.name);
+                self.cast = Some(Cast::Listening(listen));
+            }
+            Err(err) => {
+                self.status = format!("Could not listen: {err}");
+                self.cast = None;
+            }
         }
     }
 
