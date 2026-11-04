@@ -246,7 +246,8 @@ class CastController(
         AudioTap.castSink = null
         val handle = synchronized(serverLock) { server.also { server = 0L } }
         if (handle != 0L) scope.launch(Dispatchers.IO) { CastNative.serverStop(handle) }
-        if (_ui.value is CastUi.Broadcasting) _ui.value = CastUi.Idle
+        // Back to the start button, with the same choice of open or code.
+        (_ui.value as? CastUi.Broadcasting)?.let { _ui.value = CastUi.ReadyToBroadcast(it.name, it.open) }
     }
 
     private fun announce(handle: Long, open: Boolean) {
@@ -602,6 +603,7 @@ class CastController(
     /** Back to the start screen, ending whatever runs. */
     fun stopAll() {
         stopBroadcast()
+        cancelBroadcast()
         stopBrowsing()
         if (pending != 0L) cancelConnecting()
         stopListening()

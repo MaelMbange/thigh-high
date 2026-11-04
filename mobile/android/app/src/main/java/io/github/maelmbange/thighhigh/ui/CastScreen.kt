@@ -39,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -213,7 +214,12 @@ private fun OpenSwitch(open: Boolean, onSetOpen: (Boolean) -> Unit) {
         Icon(if (open) Icons.Default.LockOpen else Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.secondary)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.cast_open), color = TextColors.title, style = MaterialTheme.typography.titleMedium)
+            // On: open to everyone. Off: a code is asked.
+            Text(
+                stringResource(if (open) R.string.cast_open else R.string.cast_mode_code),
+                color = TextColors.title,
+                style = MaterialTheme.typography.titleMedium,
+            )
             // Says plainly what the switch does in its current position.
             Text(
                 stringResource(if (open) R.string.cast_open_no_code else R.string.cast_open_needs_code),
@@ -221,7 +227,14 @@ private fun OpenSwitch(open: Boolean, onSetOpen: (Boolean) -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        Switch(open, onCheckedChange = onSetOpen, modifier = Modifier.testTag("castOpen"))
+        Switch(
+            open,
+            onCheckedChange = onSetOpen,
+            modifier = Modifier.testTag("castOpen"),
+            thumbContent = {
+                Icon(if (open) Icons.Default.LockOpen else Icons.Default.Lock, null, Modifier.size(SwitchDefaults.IconSize))
+            },
+        )
     }
 }
 

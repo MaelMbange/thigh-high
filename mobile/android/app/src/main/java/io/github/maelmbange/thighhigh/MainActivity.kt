@@ -72,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -261,17 +262,16 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
-                        // On a tinted disc so it is easy to spot; filled with the
-                        // accent color while broadcasting or listening.
+                        // Drawn like the settings button; in the accent color while
+                        // broadcasting or listening.
                         val castActive = castUi is io.github.maelmbange.thighhigh.cast.CastUi.Broadcasting ||
                             castUi is io.github.maelmbange.thighhigh.cast.CastUi.Listening
-                        androidx.compose.material3.FilledTonalIconButton(
-                            onClick = { viewModel.castOpen.value = true },
-                            colors = if (castActive) androidx.compose.material3.IconButtonDefaults.filledIconButtonColors()
-                                else androidx.compose.material3.IconButtonDefaults.filledTonalIconButtonColors(),
-                            modifier = Modifier.testTag("castButton"),
-                        ) {
-                            Icon(Icons.Default.Podcasts, stringResource(R.string.cast))
+                        IconButton(onClick = { viewModel.castOpen.value = true }, modifier = Modifier.testTag("castButton")) {
+                            Icon(
+                                Icons.Default.Podcasts,
+                                stringResource(R.string.cast),
+                                tint = if (castActive) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                            )
                         }
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Default.Settings, stringResource(R.string.settings))

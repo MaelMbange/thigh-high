@@ -174,8 +174,9 @@
     <string name="cast_visible_as">Visible sous le nom « %1$s »</string>
     <string name="cast_not_visible">Impossible de s\'annoncer sur le réseau : les autres appareils ne te voient pas.</string>
     <string name="cast_open">Ouvert</string>
-    <string name="cast_open_no_code">Sans code d\'appairage</string>
-    <string name="cast_open_needs_code">Fermé : code d\'appairage à 6 chiffres demandé</string>
+    <string name="cast_mode_code">Code</string>
+    <string name="cast_open_no_code">Activé : tout le monde peut écouter, sans code</string>
+    <string name="cast_open_needs_code">Désactivé : code d\'appairage à 6 chiffres demandé</string>
     <string name="cast_code_label">Code d\'appairage</string>
     <string name="cast_open_on">Tout le monde sur ce réseau peut écouter, sans code.</string>
     <string name="cast_open_off">Les nouveaux appareils doivent taper ce code (une seule fois) :</string>
