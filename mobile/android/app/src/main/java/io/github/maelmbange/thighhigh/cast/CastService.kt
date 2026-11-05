@@ -19,7 +19,7 @@ import io.github.maelmbange.thighhigh.R
 
 /**
  * Keeps the app alive while it broadcasts or listens, even with another app
- * on screen: without a foreground service Android freezes a background app
+ * on screen (closing the app, swiped away from the recent apps, ends both): without a foreground service Android freezes a background app
  * within seconds (its network threads stop and the connection is lost).
  * The music player's own service only runs while our music plays, which is
  * not the case while listening to someone else, or broadcasting paused.
@@ -67,6 +67,13 @@ class CastService : Service() {
                 acquire()
             }
         }
+    }
+
+    /** The app swiped away from the recent apps: everything stops, as wanted. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        onStopAsked?.invoke()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

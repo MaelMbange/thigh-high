@@ -172,6 +172,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         playlistStore.playlists.value.filterNot { it.id == FAVORITES_ID }.byLastPlayed(listening.playlistPlayed.value),
     )
 
+    /** The playlists (favorites aside) in the order arranged by hand, for the Playlists tab. */
+    val arrangedPlaylists: StateFlow<List<Playlist>> = playlistStore.playlists
+        .map { list -> list.filterNot { it.id == FAVORITES_ID } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, playlistStore.playlists.value.filterNot { it.id == FAVORITES_ID })
+
+    /** The playlists were dragged into this order. */
+    fun arrangePlaylists(ids: List<String>) = playlistStore.arrange(ids)
+
     private fun favoritesOf(list: List<Playlist>) =
         list.firstOrNull { it.id == FAVORITES_ID } ?: Playlist(FAVORITES_ID, "", emptyList())
 
@@ -770,8 +778,8 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        // The broadcast goes on without the screen: its position is then
-        // guessed from the last one known.
+        // The broadcast goes on without the screen (until the app is swiped
+        // away, see CastService): its position is then guessed from the last one known.
         val last = controller?.currentPosition ?: 0L
         val playing = controller?.isPlaying == true
         val since = android.os.SystemClock.elapsedRealtime()

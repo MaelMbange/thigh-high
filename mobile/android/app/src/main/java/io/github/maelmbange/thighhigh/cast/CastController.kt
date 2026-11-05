@@ -150,7 +150,8 @@ class CastController(
 
     init {
         // A foreground service keeps the connection alive in the background.
-        CastService.onStopAsked = { scope.launch { stopAll() } }
+        // Called on the main thread (notification button, app swiped away).
+        CastService.onStopAsked = { stopAll() }
         scope.launch {
             ui.map { ui ->
                 when (ui) {
