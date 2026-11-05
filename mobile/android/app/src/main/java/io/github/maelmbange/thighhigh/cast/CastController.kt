@@ -11,6 +11,7 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import io.github.maelmbange.thighhigh.R
 import io.github.maelmbange.thighhigh.library.Track
 import io.github.maelmbange.thighhigh.lyrics.Lyrics
 import io.github.maelmbange.thighhigh.lyrics.LyricsRepository
@@ -26,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -125,10 +128,13 @@ sealed interface CastUi {
 class CastController(
     context: Context,
     private val scope: CoroutineScope,
-    private val position: () -> Long,
-    private val isPlaying: () -> Boolean,
-    private val onListenStart: () -> Unit,
 ) {
+    // Set by the screen's ViewModel; the controller itself lives as long as
+    // the app (ThighHighApp), so closing the screen doesn't end a broadcast.
+    @Volatile var position: () -> Long = { 0L }
+    @Volatile var isPlaying: () -> Boolean = { false }
+    @Volatile var onListenStart: () -> Unit = {}
+
     private val app = context.applicationContext
     private val nsd = app.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val dir = File(app.filesDir, "cast").apply { mkdirs() }.path
@@ -141,6 +147,23 @@ class CastController(
     /** Shown once by the screen, then cleared with [clearNotice]. */
     val notice: StateFlow<CastNotice?> = _notice.asStateFlow()
     fun clearNotice() { _notice.value = null }
+
+    init {
+        // A foreground service keeps the connection alive in the background.
+        CastService.onStopAsked = { scope.launch { stopAll() } }
+        scope.launch {
+            ui.map { ui ->
+                when (ui) {
+                    is CastUi.Listening -> app.getString(R.string.cast_notif_listening, ui.name)
+                    is CastUi.Broadcasting -> if (ui.listeners.isEmpty()) app.getString(R.string.cast_notif_broadcasting)
+                        else app.getString(R.string.cast_notif_broadcasting_to, ui.listeners.size)
+                    else -> null
+                }
+            }.distinctUntilChanged().collect { text ->
+                if (text != null) CastService.show(app, text) else CastService.hide(app)
+            }
+        }
+    }
 
     /** The name other devices see: the phone's name in Settings. */
     val deviceName: String =

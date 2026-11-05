@@ -62,6 +62,12 @@
             </intent-filter>
         </service>
 
+        <!-- Keeps broadcasting and listening alive with another app on screen. -->
+        <service
+            android:name=".cast.CastService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- A headset's play button restarts the music even when the app is closed. -->
         <receiver
             android:name="androidx.media3.session.MediaButtonReceiver"

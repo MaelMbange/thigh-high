@@ -223,6 +223,10 @@
     <string name="cast_radio_tracks">%1$d morceaux</string>
     <string name="cast_radio_listeners">%1$d morceaux · %2$d à l\'écoute</string>
     <string name="cast_live">En direct</string>
+    <string name="cast_stop">Arrêter</string>
+    <string name="cast_notif_listening">En écoute de %1$s</string>
+    <string name="cast_notif_broadcasting">Diffusion en cours</string>
+    <string name="cast_notif_broadcasting_to">Diffusion en cours · %1$d à l\'écoute</string>
     <string name="cast_device_listening_radio">À l\'écoute de « %1$s »</string>
     <string name="cast_device_listening_radio_open">À l\'écoute de « %1$s » (ouvert)</string>
 </resources>

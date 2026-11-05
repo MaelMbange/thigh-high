@@ -12,4 +12,7 @@ class ThighHighApp : Application() {
     val genreScanner by lazy { GenreScanner(this) }
 
     val playlists by lazy { PlaylistStore(this) }
+
+    /** Broadcasting and listening go on when the screen is closed (see CastService). */
+    val cast by lazy { io.github.maelmbange.thighhigh.cast.CastController(this, kotlinx.coroutines.MainScope()) }
 }

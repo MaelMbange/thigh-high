@@ -234,13 +234,11 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val lyricsRepository = LyricsRepository(app)
 
     /** Broadcasting on the local network ("Diffuser" / "S'abonner"). */
-    val cast = io.github.maelmbange.thighhigh.cast.CastController(
-        app,
-        viewModelScope,
-        position = { controller?.currentPosition ?: 0L },
-        isPlaying = { controller?.isPlaying == true },
-        onListenStart = { controller?.pause() },
-    )
+    val cast = getApplication<ThighHighApp>().cast.apply {
+        position = { controller?.currentPosition ?: 0L }
+        isPlaying = { controller?.isPlaying == true }
+        onListenStart = { controller?.pause() }
+    }
 
     /** Whether the broadcast screen is shown. */
     val castOpen = MutableStateFlow(false)
@@ -772,7 +770,14 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        cast.stopAll()
+        // The broadcast goes on without the screen: its position is then
+        // guessed from the last one known.
+        val last = controller?.currentPosition ?: 0L
+        val playing = controller?.isPlaying == true
+        val since = android.os.SystemClock.elapsedRealtime()
+        cast.position = { if (playing) last + android.os.SystemClock.elapsedRealtime() - since else last }
+        cast.isPlaying = { playing }
+        cast.onListenStart = {}
         controller?.removeListener(listener)
         // Releasing the controller does not stop playback: the service keeps playing.
         MediaController.releaseFuture(controllerFuture)
