@@ -32,7 +32,9 @@ fn ready(connected: Connected) -> Session {
 
 fn channels(session: &mut Session) -> (u32, Vec<Radio>) {
     match session.receive().unwrap() {
-        Event::Channels { current, radios } => (current, radios),
+        Event::Channels {
+            current, radios, ..
+        } => (current, radios),
         other => panic!("expected the channels, got {other:?}"),
     }
 }
@@ -42,6 +44,16 @@ fn next_news(session: &mut Session) -> Event {
     loop {
         match session.receive().unwrap() {
             Event::Audio { .. } => continue,
+            event => return event,
+        }
+    }
+}
+
+/// The next event that is not a new count of listeners.
+fn next_not_counts(session: &mut Session) -> Event {
+    loop {
+        match session.receive().unwrap() {
+            Event::Channels { .. } => continue,
             event => return event,
         }
     }
@@ -73,7 +85,8 @@ fn open_broadcast_streams_track_and_audio() {
     server.set_track(track.clone());
     server.set_position(1_000, true);
 
-    let mut session = ready(client::connect(&dir.join("phone"), addr(&server), "Phone", LIVE).unwrap());
+    let mut session =
+        ready(client::connect(&dir.join("phone"), addr(&server), "Phone", LIVE).unwrap());
     assert_eq!(session.name(), "PC");
     assert_eq!(session.fingerprint(), server.fingerprint());
     assert_eq!(session.receive().unwrap(), Event::Track(track));
@@ -115,7 +128,8 @@ fn code_is_asked_once_then_remembered() {
     let server = Server::start(&dir.join("pc"), "PC", false).unwrap();
     let phone = dir.join("phone");
 
-    let Connected::NeedsCode(pending) = client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
+    let Connected::NeedsCode(pending) =
+        client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
     else {
         panic!("no code asked");
     };
@@ -126,7 +140,8 @@ fn code_is_asked_once_then_remembered() {
     };
     assert!(matches!(pending.pair(wrong), Err(Error::WrongCode)));
 
-    let Connected::NeedsCode(pending) = client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
+    let Connected::NeedsCode(pending) =
+        client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
     else {
         panic!("no code asked");
     };
@@ -163,7 +178,8 @@ fn one_paired_listener_is_forgotten() {
     let phone = dir.join("phone");
     let tablet = dir.join("tablet");
     for (device, name) in [(&phone, "Phone"), (&tablet, "Tablet")] {
-        let Connected::NeedsCode(pending) = client::connect(device, addr(&server), name, LIVE).unwrap()
+        let Connected::NeedsCode(pending) =
+            client::connect(device, addr(&server), name, LIVE).unwrap()
         else {
             panic!("no code asked");
         };
@@ -201,13 +217,15 @@ fn closing_lets_go_of_listeners_without_code() {
     let dir = temp_dir("closing");
     let server = Server::start(&dir.join("pc"), "PC", false).unwrap();
     let phone = dir.join("phone");
-    let Connected::NeedsCode(pending) = client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
+    let Connected::NeedsCode(pending) =
+        client::connect(&phone, addr(&server), "Phone", LIVE).unwrap()
     else {
         panic!("no code asked");
     };
     let mut paired = pending.pair(&server.code()).unwrap();
     server.set_open(true);
-    let mut guest = ready(client::connect(&dir.join("guest"), addr(&server), "Guest", LIVE).unwrap());
+    let mut guest =
+        ready(client::connect(&dir.join("guest"), addr(&server), "Guest", LIVE).unwrap());
     wait_listeners(&server, 2);
     let listening = server.listening();
     assert!(
@@ -294,6 +312,7 @@ fn radio(id: u32, name: &str) -> Radio {
     Radio {
         id,
         name: name.into(),
+        listeners: 0,
     }
 }
 
@@ -320,7 +339,19 @@ fn radios_play_apart_from_live() {
     else {
         panic!("asked for a code");
     };
-    assert_eq!(channels(&mut rock), (1, vec![radio(1, "Rock"), radio(2, "Calme")]));
+    assert_eq!(
+        channels(&mut rock),
+        (
+            1,
+            vec![
+                Radio {
+                    listeners: 1,
+                    ..radio(1, "Rock")
+                },
+                radio(2, "Calme")
+            ]
+        )
+    );
     assert_eq!(rock.receive().unwrap(), Event::Track(rock_track));
     assert_eq!(
         rock.receive().unwrap(),
@@ -348,7 +379,7 @@ fn radios_play_apart_from_live() {
         }
     );
     assert_eq!(
-        rock.receive().unwrap(),
+        next_not_counts(&mut rock),
         Event::Audio {
             pos_ms: 2_000,
             rate: 44_100,
@@ -366,17 +397,61 @@ fn radios_play_apart_from_live() {
     drop(lost);
 
     // Taking the radio off sends its listener back to live.
+    wait_listeners(&server, 2);
+    // Counts from "lost" coming and going may still be queued.
+    std::thread::sleep(Duration::from_millis(200));
     server.set_radios(&[radio(2, "Calme")]);
-    assert_eq!(next_news(&mut rock), Event::Channels {
+    let off = Event::Channels {
         current: LIVE,
-        radios: vec![radio(2, "Calme")]
-    });
+        live: 2,
+        radios: vec![radio(2, "Calme")],
+    };
+    loop {
+        if next_news(&mut rock) == off {
+            break;
+        }
+    }
     assert_eq!(next_news(&mut rock), Event::Track(live_track));
     assert!(matches!(next_news(&mut rock), Event::State { .. }));
-    assert_eq!(next_news(&mut live), Event::Channels {
-        current: LIVE,
-        radios: vec![radio(2, "Calme")]
-    });
+    loop {
+        if next_news(&mut live) == off {
+            break;
+        }
+    }
     assert!(server.radios_listened().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn listeners_are_counted_per_channel() {
+    let dir = temp_dir("counts");
+    let server = Server::start(&dir.join("pc"), "PC", true).unwrap();
+    server.set_radios(&[radio(1, "Rock")]);
+    let mut first = ready(client::connect(&dir.join("a"), addr(&server), "A", LIVE).unwrap());
+    let Connected::Ready(mut second) =
+        client::connect(&dir.join("b"), addr(&server), "B", 1).unwrap()
+    else {
+        panic!("asked for a code");
+    };
+    assert_eq!(
+        second.receive().unwrap(),
+        Event::Channels {
+            current: 1,
+            live: 1,
+            radios: vec![Radio {
+                listeners: 1,
+                ..radio(1, "Rock")
+            }],
+        }
+    );
+    // The first one hears of the second one coming, then going.
+    let counts = |session: &mut Session| loop {
+        if let Event::Channels { live, radios, .. } = session.receive().unwrap() {
+            return (live, radios[0].listeners);
+        }
+    };
+    assert_eq!(counts(&mut first), (1, 1));
+    drop(second);
+    assert_eq!(counts(&mut first), (1, 0));
     let _ = std::fs::remove_dir_all(dir);
 }

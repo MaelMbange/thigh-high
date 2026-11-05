@@ -222,6 +222,10 @@ pub struct Listen {
     /// The channel heard: [`LIVE`] or one of `radios`.
     pub channel: u32,
     pub radios: Vec<Radio>,
+    /// Devices listening to live (each radio carries its own count).
+    pub live: u32,
+    /// The station selected in the list (Enter tunes to it).
+    pub picker: ListState,
     /// Tells this session's events from those of an earlier one.
     pub session: u64,
     /// Position in the track of the audio being heard.
@@ -233,13 +237,48 @@ pub struct Listen {
 static SESSIONS: AtomicU64 = AtomicU64::new(0);
 
 impl Listen {
+    /// Live then the radios: id, name and devices listening.
+    pub fn stations(&self) -> Vec<(u32, String, u32)> {
+        std::iter::once((LIVE, "Live".to_string(), self.live))
+            .chain(
+                self.radios
+                    .iter()
+                    .map(|r| (r.id, r.name.clone(), r.listeners)),
+            )
+            .collect()
+    }
+
     /// The channel `step` places away in [live, radios…], wrapping around.
     pub fn channel_after(&self, step: isize) -> u32 {
-        let all: Vec<u32> = std::iter::once(LIVE)
-            .chain(self.radios.iter().map(|r| r.id))
-            .collect();
+        let all: Vec<u32> = self.stations().into_iter().map(|(id, ..)| id).collect();
         let here = all.iter().position(|&c| c == self.channel).unwrap_or(0) as isize;
         all[(here + step).rem_euclid(all.len() as isize) as usize]
+    }
+
+    /// The station selected in the list.
+    pub fn picked(&self) -> Option<u32> {
+        let stations = self.stations();
+        self.picker
+            .selected()
+            .and_then(|i| stations.get(i))
+            .map(|(id, ..)| *id)
+    }
+
+    /// Takes the channels just received; the list selects the one heard.
+    pub fn set_channels(&mut self, current: u32, live: u32, radios: Vec<Radio>) {
+        let picked = self.picked();
+        self.channel = current;
+        self.live = live;
+        self.radios = radios;
+        let stations = self.stations();
+        let keep = picked.filter(|id| stations.iter().any(|(s, ..)| s == id));
+        let select = keep.unwrap_or(current);
+        self.picker.select(
+            stations
+                .iter()
+                .position(|(id, ..)| *id == select)
+                .or(Some(0)),
+        );
     }
 
     pub fn heard_ms(&self) -> u64 {
@@ -258,14 +297,19 @@ pub enum CastEvent {
     /// The rest come from the listening session numbered first.
     Track(u64, TrackInfo),
     State(u64, bool),
-    /// The channel heard and the radios on offer.
-    Channels(u64, u32, Vec<Radio>),
+    /// The channel heard, devices listening to live, and the radios.
+    Channels(u64, u32, u32, Vec<Radio>),
     /// The broadcast ended (None) or the connection was lost.
     Ended(u64, Option<String>),
 }
 
 /// Connects in the background (it can take seconds).
-pub fn connect(found: &Found, events: Sender<AppEvent>, error: Option<String>, channel: u32) -> Cast {
+pub fn connect(
+    found: &Found,
+    events: Sender<AppEvent>,
+    error: Option<String>,
+    channel: u32,
+) -> Cast {
     let addr: SocketAddr = found.addr;
     thread::spawn(move || {
         let result = client::connect(&data_dir(), addr, &device_name(), channel);
@@ -343,6 +387,8 @@ pub fn listen(
             found,
             channel,
             radios: Vec::new(),
+            live: 0,
+            picker: ListState::default().with_selected(Some(0)),
             session: number,
             heard,
             closer,
@@ -376,9 +422,11 @@ fn receive(
             }
             Ok(Event::Track(track)) => send(CastEvent::Track(number, track)),
             Ok(Event::State { playing, .. }) => send(CastEvent::State(number, playing)),
-            Ok(Event::Channels { current, radios }) => {
-                send(CastEvent::Channels(number, current, radios))
-            }
+            Ok(Event::Channels {
+                current,
+                live,
+                radios,
+            }) => send(CastEvent::Channels(number, current, live, radios)),
             Ok(Event::Ended) => {
                 send(CastEvent::Ended(number, None));
                 return;
@@ -551,7 +599,8 @@ mod tests {
         });
         server.set_position(5_000, true);
         let addr = SocketAddr::from(([127, 0, 0, 1], server.port()));
-        let Ok(Connected::Ready(session)) = client::connect(&dir.join("me"), addr, "Me", LIVE) else {
+        let Ok(Connected::Ready(session)) = client::connect(&dir.join("me"), addr, "Me", LIVE)
+        else {
             panic!("could not join");
         };
         let (events, app_events) = mpsc::channel();

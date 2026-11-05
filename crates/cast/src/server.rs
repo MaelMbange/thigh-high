@@ -4,10 +4,10 @@
 //! audio is sent as it is played, never as a file, and nothing a listener
 //! sends can reach the library: after hello (and the code) it only receives.
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -185,7 +185,13 @@ impl Server {
         let listeners = self.shared.listeners.lock().unwrap();
         listeners
             .iter()
-            .map(|l| (l.paired.clone(), l.name.clone(), l.channel.load(Ordering::Relaxed)))
+            .map(|l| {
+                (
+                    l.paired.clone(),
+                    l.name.clone(),
+                    l.channel.load(Ordering::Relaxed),
+                )
+            })
             .collect()
     }
 
@@ -196,14 +202,22 @@ impl Server {
         let mut seen = Vec::new();
         let radios: Vec<Radio> = radios
             .iter()
-            .filter(|r| r.id != LIVE && !seen.contains(&r.id) && {
-                seen.push(r.id);
-                true
+            .filter(|r| {
+                r.id != LIVE && !seen.contains(&r.id) && {
+                    seen.push(r.id);
+                    true
+                }
             })
             .take(MAX_RADIOS)
             .map(|r| Radio {
                 id: r.id,
-                name: r.name.chars().filter(|c| !c.is_control()).take(64).collect(),
+                name: r
+                    .name
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(64)
+                    .collect(),
+                listeners: 0,
             })
             .collect();
         let mut channels = self.shared.channels.lock().unwrap();
@@ -217,18 +231,23 @@ impl Server {
             live.track.clone(),
             Some(Arc::new(channel_state(live).encode())),
         ];
-        let mut listeners = self.shared.listeners.lock().unwrap();
-        for listener in listeners.iter_mut() {
-            let mut current = listener.channel.load(Ordering::Relaxed);
-            let moved = !channels.contains_key(&current);
-            if moved {
-                current = LIVE;
-                listener.channel.store(LIVE, Ordering::Relaxed);
-            }
-            let list = Message::Channels {
-                current,
-                radios: radios.clone(),
-            };
+        let listeners = self.shared.listeners.lock().unwrap();
+        let moved: Vec<bool> = listeners
+            .iter()
+            .map(|listener| {
+                let gone = !channels.contains_key(&listener.channel.load(Ordering::Relaxed));
+                if gone {
+                    listener.channel.store(LIVE, Ordering::Relaxed);
+                }
+                gone
+            })
+            .collect();
+        for (listener, moved) in listeners.iter().zip(moved) {
+            let list = channels_message(
+                &radios,
+                &listeners,
+                listener.channel.load(Ordering::Relaxed),
+            );
             let _ = listener.queue.try_send(Arc::new(list.encode()));
             if moved {
                 for frame in back_to_live.iter().flatten() {
@@ -300,8 +319,10 @@ impl Server {
             std::mem::replace(&mut state.playing, playing) != playing
         };
         if changed {
-            self.shared
-                .send(channel, Arc::new(Message::State { playing, pos_ms }.encode()));
+            self.shared.send(
+                channel,
+                Arc::new(Message::State { playing, pos_ms }.encode()),
+            );
         }
     }
 
@@ -318,7 +339,14 @@ impl Server {
         if samples.is_empty() || !self.shared.heard(channel) {
             return;
         }
-        let Some(pos_ms) = self.shared.channels.lock().unwrap().get(&channel).map(|c| c.pos_ms) else {
+        let Some(pos_ms) = self
+            .shared
+            .channels
+            .lock()
+            .unwrap()
+            .get(&channel)
+            .map(|c| c.pos_ms)
+        else {
             return;
         };
         let frame = Message::Audio {
@@ -362,6 +390,27 @@ fn stereo<T: Copy>(samples: &[T], channels: usize, convert: impl Fn(T) -> i16) -
     }
 }
 
+/// The channels as one listener sees them, with how many hear each one.
+fn channels_message(radios: &[Radio], listeners: &[Listener], current: u32) -> Message {
+    let count = |channel: u32| {
+        listeners
+            .iter()
+            .filter(|l| l.channel.load(Ordering::Relaxed) == channel)
+            .count() as u32
+    };
+    Message::Channels {
+        current,
+        live: count(LIVE),
+        radios: radios
+            .iter()
+            .map(|r| Radio {
+                listeners: count(r.id),
+                ..r.clone()
+            })
+            .collect(),
+    }
+}
+
 fn channel_state(channel: &Channel) -> Message {
     Message::State {
         playing: channel.playing,
@@ -370,6 +419,21 @@ fn channel_state(channel: &Channel) -> Message {
 }
 
 impl Shared {
+    /// Tells every listener but `except` the channels and how many hear
+    /// each, after someone came, left or switched.
+    fn announce_channels(&self, except: Option<u64>) {
+        let radios = self.radios.lock().unwrap().clone();
+        let listeners = self.listeners.lock().unwrap();
+        for listener in listeners.iter().filter(|l| Some(l.id) != except) {
+            let list = channels_message(
+                &radios,
+                &listeners,
+                listener.channel.load(Ordering::Relaxed),
+            );
+            let _ = listener.queue.try_send(Arc::new(list.encode()));
+        }
+    }
+
     /// Whether someone listens to that channel.
     fn heard(&self, channel: u32) -> bool {
         let listeners = self.listeners.lock().unwrap();
@@ -386,15 +450,15 @@ impl Shared {
                 return true;
             }
             match listener.queue.try_send(frame.clone()) {
-            Ok(()) => {
-                listener.dropped = 0;
-                true
-            }
-            Err(TrySendError::Full(_)) => {
-                listener.dropped += 1;
-                listener.dropped < MAX_DROPPED
-            }
-            Err(TrySendError::Disconnected(_)) => false,
+                Ok(()) => {
+                    listener.dropped = 0;
+                    true
+                }
+                Err(TrySendError::Full(_)) => {
+                    listener.dropped += 1;
+                    listener.dropped < MAX_DROPPED
+                }
+                Err(TrySendError::Disconnected(_)) => false,
             }
         });
     }
@@ -500,9 +564,15 @@ fn serve(shared: &Shared, stream: TcpStream) -> io::Result<()> {
     // The channels are locked meanwhile, so a radio can't go in between.
     let first = {
         let channels = shared.channels.lock().unwrap();
-        let channel = if channels.contains_key(&channel) { channel } else { LIVE };
+        let channel = if channels.contains_key(&channel) {
+            channel
+        } else {
+            LIVE
+        };
         let tuned = Arc::new(AtomicU32::new(channel));
-        shared.listeners.lock().unwrap().push(Listener {
+        let radios = shared.radios.lock().unwrap().clone();
+        let mut listeners = shared.listeners.lock().unwrap();
+        listeners.push(Listener {
             id,
             name,
             paired,
@@ -510,15 +580,23 @@ fn serve(shared: &Shared, stream: TcpStream) -> io::Result<()> {
             dropped: 0,
             channel: tuned.clone(),
         });
+        let list = channels_message(&radios, &listeners, channel);
         let state = &channels[&channel];
-        let list = Message::Channels {
-            current: channel,
-            radios: shared.radios.lock().unwrap().clone(),
-        };
-        (tuned, [Some(Arc::new(list.encode())), state.track.clone(), Some(Arc::new(channel_state(state).encode()))])
+        (
+            tuned,
+            [
+                Some(Arc::new(list.encode())),
+                state.track.clone(),
+                Some(Arc::new(channel_state(state).encode())),
+            ],
+        )
     };
+    shared.announce_channels(Some(id));
     let result = stream_to(shared, &mut tls, frames, first);
     shared.listeners.lock().unwrap().retain(|l| l.id != id);
+    if !shared.stopped.load(Ordering::Relaxed) {
+        shared.announce_channels(None);
+    }
     let _ = wire::write(&mut tls, &Message::Bye);
     tls.conn.send_close_notify();
     let _ = tls.flush();

@@ -88,7 +88,13 @@ fn spaced_code(code: &str) -> String {
 /// The broadcast dialog: choose, broadcast, find a device, type its code, listen.
 fn draw_cast(frame: &mut Frame, app: &mut App) {
     let colors = colors(app);
-    let [area] = Layout::horizontal([Constraint::Max(60)])
+    // Listening has the list of stations beside the music.
+    let width = if matches!(app.cast, Some(Cast::Listening(_))) {
+        90
+    } else {
+        60
+    };
+    let [area] = Layout::horizontal([Constraint::Max(width)])
         .flex(Flex::Center)
         .areas(frame.area());
     let [area] = Layout::vertical([Constraint::Length(14)])
@@ -108,7 +114,7 @@ fn draw_cast(frame: &mut Frame, app: &mut App) {
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(colors.primary))
         .title(Line::from(title).fg(colors.secondary).bold());
-    let inner = block.inner(area).inner(Margin::new(1, 0));
+    let mut inner = block.inner(area).inner(Margin::new(1, 0));
     frame.render_widget(block, area);
 
     let dim = |text: String| Line::from(text).dark_gray();
@@ -248,28 +254,56 @@ fn draw_cast(frame: &mut Frame, app: &mut App) {
             lines
         }
         Cast::Listening(listen) => {
+            // [stations][music]: live and the broadcaster's radios, each with
+            // how many devices listen; the one heard is marked.
+            let [stations_area, _, music_area] = Layout::horizontal([
+                Constraint::Length(30),
+                Constraint::Length(1),
+                Constraint::Min(20),
+            ])
+            .areas(inner);
+            let items: Vec<ListItem> = listen
+                .stations()
+                .into_iter()
+                .map(|(id, name, listeners)| {
+                    let heard = id == listen.channel;
+                    let mark = if heard { "▶ " } else { "  " };
+                    let count = match listeners {
+                        0 => String::new(),
+                        n => format!("  ({n})"),
+                    };
+                    let name = Span::from(name);
+                    ListItem::new(Line::from(vec![
+                        Span::from(mark).fg(colors.primary),
+                        if heard {
+                            name.fg(colors.primary).bold()
+                        } else {
+                            name
+                        },
+                        Span::from(count).fg(colors.tertiary),
+                    ]))
+                })
+                .collect();
+            let stations = List::new(items)
+                .block(
+                    Block::bordered()
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::new().fg(colors.secondary))
+                        .title(Line::from(" Stations ").fg(colors.secondary)),
+                )
+                .highlight_style(
+                    Style::new()
+                        .fg(Color::Black)
+                        .bg(colors.primary)
+                        .add_modifier(Modifier::BOLD),
+                );
+            frame.render_stateful_widget(stations, stations_area, &mut listen.picker);
+            inner = music_area;
             let mut lines = vec![Line::from(vec![
                 Span::from("From "),
                 Span::from(listen.name.clone()).fg(colors.secondary).bold(),
                 Span::from(if listen.playing { "" } else { "  (paused)" }).dark_gray(),
             ])];
-            if !listen.radios.is_empty() {
-                // Live, then the broadcaster's radios: the one heard stands out.
-                let channels = std::iter::once((thigh_high_cast::LIVE, "Live".to_string()))
-                    .chain(listen.radios.iter().map(|r| (r.id, r.name.clone())));
-                let mut spans = Vec::new();
-                for (id, name) in channels {
-                    if !spans.is_empty() {
-                        spans.push(Span::from(" · ").dark_gray());
-                    }
-                    spans.push(if id == listen.channel {
-                        Span::from(format!("[{name}]")).fg(colors.primary).bold()
-                    } else {
-                        Span::from(name).dark_gray()
-                    });
-                }
-                lines.push(Line::from(spans));
-            }
             match &listen.track {
                 Some(track) => {
                     lines.push(Line::from(track.title.clone()).fg(colors.primary).bold());
@@ -796,7 +830,9 @@ fn help_line(app: &App, colors: Colors) -> Line<'static> {
             Some(Cast::Connecting { .. }) => &[("Esc", "cancel")],
             Some(Cast::AskingCode(_)) => &[("0-9", "code"), ("Enter", "send"), ("Esc", "cancel")],
             Some(Cast::Listening(_)) => &[
-                ("Tab", "radio"),
+                ("↑↓", "station"),
+                ("Enter", "tune"),
+                ("Tab", "next"),
                 ("Space", "pause"),
                 ("+/-", "vol"),
                 ("x", "stop listening"),

@@ -76,7 +76,7 @@ data class RadioSource(val playlistId: String, val name: String, val tracks: Lis
 data class RadioOption(val playlistId: String, val name: String, val trackCount: Int, val on: Boolean)
 
 /** A channel of the broadcaster being heard: [id] is [CastNative.LIVE] or a radio. */
-data class CastChannel(val id: Int, val name: String)
+data class CastChannel(val id: Int, val name: String, val listeners: Int = 0)
 
 /** A listener that entered the code once and comes back without it. */
 data class PairedDevice(val id: String, val name: String)
@@ -107,6 +107,8 @@ sealed interface CastUi {
         /** The broadcaster's radios (live aside), and the channel heard. */
         val radios: List<CastChannel> = emptyList(),
         val channel: Int = CastNative.LIVE,
+        /** Devices listening to live (each radio carries its own count). */
+        val liveListeners: Int = 0,
         /** Set while switching to that channel. */
         val tuning: Int? = null,
     ) : CastUi
@@ -721,13 +723,16 @@ class CastController(
                     }
                     n == CastNative.CHANNELS -> {
                         val lines = CastNative.clientChannels(handle).lines()
-                        val current = lines.firstOrNull()?.toIntOrNull() ?: CastNative.LIVE
+                        val head = lines.firstOrNull().orEmpty().split('\t')
+                        val current = head.getOrNull(0)?.toIntOrNull() ?: CastNative.LIVE
+                        val live = head.getOrNull(1)?.toIntOrNull() ?: 0
                         val radios = lines.drop(1).mapNotNull { line ->
-                            val id = line.substringBefore('\t').toIntOrNull() ?: return@mapNotNull null
-                            CastChannel(id, line.substringAfter('\t'))
+                            val fields = line.split('\t', limit = 3)
+                            val id = fields[0].toIntOrNull() ?: return@mapNotNull null
+                            CastChannel(id, fields.getOrElse(2) { "" }, fields.getOrNull(1)?.toIntOrNull() ?: 0)
                         }
                         if (session == handle) _ui.update {
-                            if (it is CastUi.Listening) it.copy(radios = radios, channel = current, tuning = null) else it
+                            if (it is CastUi.Listening) it.copy(radios = radios, channel = current, liveListeners = live, tuning = null) else it
                         }
                     }
                     n == CastNative.STATE -> {

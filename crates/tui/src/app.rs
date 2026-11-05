@@ -928,23 +928,46 @@ impl App {
                 }
                 KeyCode::Char('+') | KeyCode::Char('=') => self.change_volume(0.05),
                 KeyCode::Char('-') => self.change_volume(-0.05),
-                // Another channel of the same device: live or one of its radios.
+                // The list of stations: pick one, Enter tunes to it.
+                KeyCode::Down | KeyCode::Char('j') => listen.picker.select_next(),
+                KeyCode::Up | KeyCode::Char('k') => listen.picker.select_previous(),
+                KeyCode::Enter => {
+                    if let Some(channel) = listen.picked() {
+                        self.tune(channel);
+                    }
+                }
+                // Straight to the next or previous station.
                 KeyCode::Tab | KeyCode::Right | KeyCode::BackTab | KeyCode::Left
                     if !listen.radios.is_empty() =>
                 {
-                    let step = if matches!(key.code, KeyCode::Tab | KeyCode::Right) { 1 } else { -1 };
+                    let step = if matches!(key.code, KeyCode::Tab | KeyCode::Right) {
+                        1
+                    } else {
+                        -1
+                    };
                     let channel = listen.channel_after(step);
-                    listen.stop();
-                    if let Some(player) = &self.player {
-                        player.stop();
-                    }
-                    let found = listen.found.clone();
-                    self.cast = Some(cast::connect(&found, self.tx.clone(), None, channel));
+                    self.tune(channel);
                 }
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') => self.close_cast_dialog(),
                 _ => {}
             },
         }
+    }
+
+    /// Hears another channel of the device listened to: live or a radio.
+    fn tune(&mut self, channel: u32) {
+        let Some(Cast::Listening(listen)) = &self.cast else {
+            return;
+        };
+        if listen.channel == channel {
+            return;
+        }
+        listen.stop();
+        let found = listen.found.clone();
+        if let Some(player) = &self.player {
+            player.stop();
+        }
+        self.cast = Some(cast::connect(&found, self.tx.clone(), None, channel));
     }
 
     fn start_broadcast(&mut self) {
@@ -1063,12 +1086,11 @@ impl App {
                     listen.playing = playing;
                 }
             }
-            CastEvent::Channels(session, current, radios) => {
+            CastEvent::Channels(session, current, live, radios) => {
                 if let Some(Cast::Listening(listen)) = &mut self.cast
                     && listen.session == session
                 {
-                    listen.channel = current;
-                    listen.radios = radios;
+                    listen.set_channels(current, live, radios);
                 }
             }
             CastEvent::Ended(session, reason) => {

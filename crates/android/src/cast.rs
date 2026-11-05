@@ -213,6 +213,7 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_serve
                     Some(Radio {
                         id: id.parse().ok()?,
                         name: name.to_string(),
+                        listeners: 0,
                     })
                 })
                 .collect();
@@ -351,6 +352,7 @@ struct Received {
     error: String,
     /// The channel heard, and the radios on offer.
     channel: u32,
+    live: u32,
     radios: Vec<Radio>,
 }
 
@@ -540,8 +542,13 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
                 received.pos_ms = pos_ms;
                 STATE
             }
-            Ok(Event::Channels { current, radios }) => {
+            Ok(Event::Channels {
+                current,
+                live,
+                radios,
+            }) => {
                 received.channel = current;
+                received.live = live;
                 received.radios = radios;
                 CHANNELS
             }
@@ -604,8 +611,9 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
     new_string(&mut env, &error)
 }
 
-/// The channel heard on the first line, then the radios on offer, one per
-/// line: id, a tab, the name.
+/// The channel heard, a tab and the devices listening to live on the first
+/// line, then the radios on offer, one per line: id, a tab, its listeners,
+/// a tab, the name.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clientChannels<'l>(
     mut env: JNIEnv<'l>,
@@ -614,10 +622,15 @@ pub extern "system" fn Java_io_github_maelmbange_thighhigh_cast_CastNative_clien
 ) -> jstring {
     let text = {
         let received = unsafe { client(handle) }.received.lock().unwrap();
-        let mut text = received.channel.to_string();
+        let mut text = format!("{}\t{}", received.channel, received.live);
         for radio in &received.radios {
             text.push('\n');
-            text.push_str(&format!("{}\t{}", radio.id, radio.name.replace(['\t', '\n'], " ")));
+            text.push_str(&format!(
+                "{}\t{}\t{}",
+                radio.id,
+                radio.listeners,
+                radio.name.replace(['\t', '\n'], " ")
+            ));
         }
         text
     };

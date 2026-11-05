@@ -62,7 +62,7 @@ object CastNative {
     @JvmStatic external fun clientError(handle: Long): String
     /** Title, artist, album and duration (ms), one per line. */
     @JvmStatic external fun clientTrack(handle: Long): String
-    /** The channel heard on the first line, then the radios on offer: id, a tab, the name. */
+    /** The channel heard and live's listeners (tab apart) first, then each radio: id, listeners, name, tab apart. */
     @JvmStatic external fun clientChannels(handle: Long): String
     @JvmStatic external fun clientCover(handle: Long): ByteArray?
     @JvmStatic external fun clientLyrics(handle: Long): String?
@@ -81,7 +81,7 @@ object CastNative {
 
     /** Same as `thigh_high_cast::SERVICE_TYPE` and `wire::PROTOCOL`. */
     const val SERVICE_TYPE = "_thighhigh._tcp"
-    const val PROTOCOL = "2"
+    const val PROTOCOL = "3"
 
     /** The kind of a thrown or reported error: "wrong_code", "code_changed", "full", "protocol", "io". */
     fun errorKind(message: String?): String = message?.substringBefore('|', "io") ?: "io"

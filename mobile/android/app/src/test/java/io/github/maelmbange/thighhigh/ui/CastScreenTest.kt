@@ -88,9 +88,10 @@ class CastScreenTest {
 
     @Test
     fun listenerPicksAChannel() {
-        ui = CastUi.Listening("PC", track = null, playing = true, radios = listOf(CastChannel(1, "Rock"), CastChannel(2, "Calme")), channel = 1)
+        ui = CastUi.Listening("PC", track = null, playing = true, radios = listOf(CastChannel(1, "Rock", listeners = 2), CastChannel(2, "Calme")), channel = 1, liveListeners = 1)
         show()
-        rule.onNodeWithText("En direct").performClick()
+        rule.onNodeWithText("Rock · 2").assertExists()
+        rule.onNodeWithText("En direct · 1").performClick()
         rule.onNodeWithText("Calme").performClick()
         assertEquals(listOf("tune:0", "tune:2"), calls)
     }

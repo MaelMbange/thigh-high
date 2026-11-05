@@ -206,7 +206,12 @@ pub enum Event {
     },
     /// The radios on offer and the channel heard: sent first, then on
     /// every change.
-    Channels { current: u32, radios: Vec<Radio> },
+    Channels {
+        current: u32,
+        /// Devices listening to live; each radio carries its own count.
+        live: u32,
+        radios: Vec<Radio>,
+    },
     /// The broadcast ended.
     Ended,
 }
@@ -249,7 +254,15 @@ impl Session {
                 samples,
             },
             Message::State { playing, pos_ms } => Event::State { playing, pos_ms },
-            Message::Channels { current, radios } => Event::Channels { current, radios },
+            Message::Channels {
+                current,
+                live,
+                radios,
+            } => Event::Channels {
+                current,
+                live,
+                radios,
+            },
             Message::Bye => Event::Ended,
             _ => return Err(Error::Protocol),
         })

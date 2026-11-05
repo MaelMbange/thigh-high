@@ -7,7 +7,7 @@
 use std::io::{self, Read, Write};
 
 /// Bumped when the messages change in a way older apps can't read.
-pub const PROTOCOL: u16 = 2;
+pub const PROTOCOL: u16 = 3;
 
 /// The channel of what the broadcaster itself plays; radios have other ids.
 pub const LIVE: u32 = 0;
@@ -72,6 +72,8 @@ pub enum Message {
     /// hears (a radio that is taken off sends its listeners back to live).
     Channels {
         current: u32,
+        /// Devices listening to [`LIVE`].
+        live: u32,
         radios: Vec<Radio>,
     },
 }
@@ -81,6 +83,8 @@ pub enum Message {
 pub struct Radio {
     pub id: u32,
     pub name: String,
+    /// Devices listening to it (ignored when the broadcaster offers radios).
+    pub listeners: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,12 +263,18 @@ impl Message {
                 o.u8(*playing as u8);
                 o.u64(*pos_ms);
             }
-            Message::Channels { current, radios } => {
+            Message::Channels {
+                current,
+                live,
+                radios,
+            } => {
                 o.u32(*current);
+                o.u32(*live);
                 o.u32(radios.len() as u32);
                 for radio in radios {
                     o.u32(radio.id);
                     o.str(&radio.name);
+                    o.u32(radio.listeners);
                 }
             }
         }
@@ -333,15 +343,21 @@ impl Message {
             23 => Message::Bye,
             24 => {
                 let current = i.u32()?;
+                let live = i.u32()?;
                 let count = i.u32()? as usize;
                 let mut radios = Vec::with_capacity(count.min(256));
                 for _ in 0..count {
                     radios.push(Radio {
                         id: i.u32()?,
                         name: i.str()?,
+                        listeners: i.u32()?,
                     });
                 }
-                Message::Channels { current, radios }
+                Message::Channels {
+                    current,
+                    live,
+                    radios,
+                }
             }
             _ => return Err(invalid("unknown message")),
         };
@@ -381,9 +397,11 @@ mod tests {
             },
             Message::Channels {
                 current: 3,
+                live: 2,
                 radios: vec![Radio {
                     id: 3,
                     name: "Été".into(),
+                    listeners: 1,
                 }],
             },
             Message::Accepted {

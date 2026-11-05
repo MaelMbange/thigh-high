@@ -971,6 +971,7 @@ internal fun LivePlayerScreen(
     /** The broadcaster's radios: when there are some, live and each radio can be picked. */
     radios: List<io.github.maelmbange.thighhigh.cast.CastChannel> = emptyList(),
     channel: Int = io.github.maelmbange.thighhigh.cast.CastNative.LIVE,
+    liveListeners: Int = 0,
     onTune: (Int) -> Unit = {},
 ) {
     val palette = track?.palette ?: CoverPalette.Default
@@ -1008,6 +1009,7 @@ internal fun LivePlayerScreen(
             val live = io.github.maelmbange.thighhigh.cast.CastChannel(
                 io.github.maelmbange.thighhigh.cast.CastNative.LIVE,
                 stringResource(R.string.cast_live),
+                liveListeners,
             )
             androidx.compose.foundation.lazy.LazyRow(
                 Modifier.fillMaxWidth().testTag("castChannels"),
@@ -1017,7 +1019,14 @@ internal fun LivePlayerScreen(
                     androidx.compose.material3.FilterChip(
                         selected = option.id == channel,
                         onClick = { onTune(option.id) },
-                        label = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        // The name, then how many devices listen to it (this one included).
+                        label = {
+                            Text(
+                                if (option.listeners > 0) "${option.name} · ${option.listeners}" else option.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                         colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
                             selectedContainerColor = palette.primary.copy(alpha = 0.35f),
                         ),

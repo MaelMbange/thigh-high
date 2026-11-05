@@ -555,6 +555,7 @@ private fun Listening(
         pulseSource = pulseSource,
         radios = ui.radios,
         channel = ui.tuning ?: ui.channel,
+        liveListeners = ui.liveListeners,
         onTune = onTune,
     )
 }
