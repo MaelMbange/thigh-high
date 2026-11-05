@@ -219,6 +219,7 @@ class MainActivity : ComponentActivity() {
         val playerOpen by viewModel.playerOpen.collectAsStateWithLifecycle()
         val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
         val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+        val arrangedPlaylists by viewModel.arrangedPlaylists.collectAsStateWithLifecycle()
         val favorites by viewModel.favorites.collectAsStateWithLifecycle()
         val recent by viewModel.recent.collectAsStateWithLifecycle()
         val homeView by viewModel.homeView.collectAsStateWithLifecycle()
@@ -448,7 +449,7 @@ class MainActivity : ComponentActivity() {
                             else viewModel.openPlaylistId.value = null
                         }
                         PlaylistsScreen(
-                            playlists = playlists,
+                            playlists = arrangedPlaylists,
                             library = tracks.orEmpty(),
                             openId = openPlaylistId,
                             currentId = playback.currentId,
@@ -470,6 +471,7 @@ class MainActivity : ComponentActivity() {
                             onRename = viewModel::renamePlaylist,
                             onDelete = viewModel::deletePlaylist,
                             onAddTracks = viewModel::addTracks,
+                            onArrange = viewModel::arrangePlaylists,
                         )
                     }
                     Tab.Download -> DownloadScreen(

@@ -48,6 +48,17 @@ class PlaylistStore(context: Context) {
         p.copy(trackIds = p.trackIds + trackIds.filterNot { it in p.trackIds })
     }
 
+    /**
+     * Puts the playlists in this order (as dragged in the Playlists tab).
+     * Those not named (the favorites, one made meanwhile) keep their place
+     * after them.
+     */
+    fun arrange(ids: List<String>) = change { list ->
+        val byId = list.associateBy { it.id }
+        val arranged = ids.distinct().mapNotNull(byId::get)
+        arranged + list.filterNot { it in arranged }
+    }
+
     fun remove(id: String, trackId: Long) = edit(id) { p -> p.copy(trackIds = p.trackIds - trackId) }
 
     /** [old] was replaced by a new version of the same song: playlists keep their place for it. */

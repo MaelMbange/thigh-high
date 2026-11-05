@@ -19,6 +19,18 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +92,8 @@ fun PlaylistsScreen(
     onRename: (Playlist, String) -> Unit,
     onDelete: (Playlist) -> Unit,
     onAddTracks: (Playlist, List<Long>) -> Unit,
+    /** The playlists were dragged into this order (their ids). */
+    onArrange: (List<String>) -> Unit = {},
 ) {
     val open = playlists.firstOrNull { it.id == openId }
     // Opening a playlist slides it in from the right; going back slides it out.
@@ -100,7 +114,7 @@ fun PlaylistsScreen(
         label = "playlist",
     ) { playlist ->
         if (playlist == null) {
-            PlaylistGrid(playlists, library, onOpen = { onOpen(it.id) }, onCreate = onCreate, onDelete = onDelete)
+            PlaylistGrid(playlists, library, onOpen = { onOpen(it.id) }, onCreate = onCreate, onDelete = onDelete, onArrange = onArrange)
         } else {
             PlaylistDetail(
                 playlist,
@@ -124,6 +138,10 @@ fun PlaylistsScreen(
 /**
  * The playlists as a grid of covers, two by row (a trial: the list it
  * replaced may come back), led by a tile that creates one.
+ *
+ * A long press then a drag moves a playlist: the others make room as it
+ * goes, and the order is kept when it is let go. A long press without
+ * moving offers to delete it, as before.
  */
 @Composable
 private fun PlaylistGrid(
@@ -132,13 +150,88 @@ private fun PlaylistGrid(
     onOpen: (Playlist) -> Unit,
     onCreate: (String) -> Unit,
     onDelete: (Playlist) -> Unit,
+    onArrange: (List<String>) -> Unit,
 ) {
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
     val inLibrary = remember(library) { library.mapTo(HashSet()) { it.id } }
+    val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    // The order shown: the playlists' own, or the one being dragged into.
+    var order by remember { mutableStateOf(playlists) }
+    var dragged by remember { mutableStateOf<String?>(null) }
+    // Where the finger is in the grid, and where it took the tile.
+    var finger by remember { mutableStateOf(Offset.Zero) }
+    var grab by remember { mutableStateOf(Offset.Zero) }
+    var moved by remember { mutableStateOf(false) }
+    var travelled by remember { mutableStateOf(0f) }
+    var swappedWith by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playlists) { if (dragged == null) order = playlists }
+    val slop = LocalViewConfiguration.current.touchSlop
+
+    fun tileAt(position: Offset) = grid.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+        val x = position.x - item.offset.x
+        val y = position.y - item.offset.y
+        item.key != "new" && x in 0f..item.size.width.toFloat() && y in 0f..item.size.height.toFloat()
+    }
+
+    fun finish() {
+        val id = dragged ?: return
+        dragged = null
+        if (moved) {
+            onArrange(order.map { it.id })
+        } else {
+            deleting = order.firstOrNull { it.id == id }
+        }
+    }
+
     LazyVerticalGrid(
         GridCells.Fixed(2),
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().testTag("playlistGrid").pointerInput(Unit) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { start ->
+                    val tile = tileAt(start) ?: return@detectDragGesturesAfterLongPress
+                    dragged = tile.key as String
+                    moved = false
+                    travelled = 0f
+                    swappedWith = null
+                    finger = start
+                    grab = start - Offset(tile.offset.x.toFloat(), tile.offset.y.toFloat())
+                },
+                onDrag = { change, amount ->
+                    val id = dragged ?: return@detectDragGesturesAfterLongPress
+                    change.consume()
+                    finger += amount
+                    travelled += amount.getDistance()
+                    if (travelled > slop) moved = true
+                    // Over another tile: the dragged one takes its place. Until
+                    // the grid has moved them, the finger is still over the tile
+                    // just swapped with: that one doesn't count again.
+                    val target = tileAt(finger)?.key as? String
+                    if (target != swappedWith) swappedWith = null
+                    if (target != null && target != id && target != swappedWith) {
+                        swappedWith = target
+                        val from = order.indexOfFirst { it.id == id }
+                        val to = order.indexOfFirst { it.id == target }
+                        if (from >= 0 && to >= 0) {
+                            order = order.toMutableList().apply { add(to, removeAt(from)) }
+                        }
+                    }
+                    // Near an edge, the grid scrolls along.
+                    val edge = 64.dp.toPx()
+                    val height = grid.layoutInfo.viewportSize.height
+                    val step = when {
+                        finger.y < edge -> -20f
+                        finger.y > height - edge -> 20f
+                        else -> 0f
+                    }
+                    if (step != 0f) scope.launch { grid.scrollBy(step) }
+                },
+                onDragEnd = { finish() },
+                onDragCancel = { finish() },
+            )
+        },
+        state = grid,
         contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -167,12 +260,31 @@ private fun PlaylistGrid(
                 )
             }
         }
-        items(playlists, key = { it.id }) { playlist ->
-            BoxWithConstraints(Modifier.animateItem()) {
+        items(order, key = { it.id }) { playlist ->
+            val lifted = playlist.id == dragged
+            BoxWithConstraints(
+                (if (lifted) Modifier else Modifier.animateItem())
+                    .zIndex(if (lifted) 1f else 0f)
+                    .graphicsLayer {
+                        if (lifted) {
+                            // Follows the finger from wherever the grid has put it.
+                            val tile = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.key == playlist.id }
+                            if (tile != null) {
+                                translationX = finger.x - grab.x - tile.offset.x
+                                translationY = finger.y - grab.y - tile.offset.y
+                            }
+                            scaleX = 1.06f
+                            scaleY = 1.06f
+                            shadowElevation = 16.dp.toPx()
+                            shape = RoundedCornerShape(16.dp)
+                        }
+                    }
+                    .testTag("playlistTile"),
+            ) {
                 val side = maxWidth
                 Column(
-                    Modifier
-                        .combinedClickable(onClick = { onOpen(playlist) }, onLongClick = { deleting = playlist }),
+                    // The press of a drag (or of the long press) isn't a tap.
+                    Modifier.clickable { if (dragged == null) onOpen(playlist) },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     PlaylistCover(playlist.trackIds.filter { it in inLibrary }, side, corner = 16.dp)
@@ -187,7 +299,7 @@ private fun PlaylistGrid(
                 }
             }
         }
-        if (playlists.isEmpty()) {
+        if (order.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     stringResource(R.string.playlists_empty),

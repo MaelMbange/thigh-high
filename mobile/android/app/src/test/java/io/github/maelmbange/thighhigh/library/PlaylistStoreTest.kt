@@ -24,6 +24,16 @@ class PlaylistStoreTest {
         assertEquals(listOf(Playlist(p.id, "Été", listOf(3L, 2L))), reloaded)
     }
 
+    @Test fun keepsTheArrangedOrder() {
+        val store = PlaylistStore(context)
+        val a = store.create("A")
+        val b = store.create("B")
+        store.add(FAVORITES_ID, listOf(1L))
+        val c = store.create("C")
+        store.arrange(listOf(c.id, a.id, b.id))
+        assertEquals(listOf(c.id, a.id, b.id, FAVORITES_ID), PlaylistStore(context).playlists.value.map { it.id })
+    }
+
     @Test fun skipsDeletedTracksInOrder() {
         val t = { id: Long -> Track(id, "t$id", null, null, null, null, null) }
         val playlist = Playlist("x", "x", listOf(5L, 9L, 1L))
